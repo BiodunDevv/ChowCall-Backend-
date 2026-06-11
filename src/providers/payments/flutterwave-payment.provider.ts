@@ -35,7 +35,7 @@ export const flutterwavePaymentProvider: PaymentProvider = {
         tx_ref: input.reference,
         amount: input.amount,
         currency: "NGN",
-        redirect_url: `${env.APP_URL ?? "https://chowcall.live"}/payment/callback`,
+        redirect_url: `${env.FRONTEND_BASE_URL ?? "https://chowcall.live"}/payment/callback`,
         customer: {
           email: input.email ?? "customer@chowcall.ng",
           phonenumber: input.phone ?? "",
