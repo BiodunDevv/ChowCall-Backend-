@@ -1,24 +1,8 @@
-import { readFileSync } from "node:fs";
-import { join, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-
-// Inline the logo as a base64 data URI so it renders in every email client
-// without depending on a live public URL.
-function loadLogoDataUri(): string {
-  try {
-    const dir = dirname(fileURLToPath(import.meta.url));
-    const logoPath = join(dir, "../../../../assets/brand/chowcall-logo.png");
-    const buf = readFileSync(logoPath);
-    return `data:image/png;base64,${buf.toString("base64")}`;
-  } catch {
-    // Fallback to hosted URL if the file isn't available (e.g. in tests / CI)
-    return "https://chowcall.ng/chowcall-logo.png";
-  }
-}
+import { env } from "../../../config/env.js";
 
 export const emailTheme = {
   appName: "ChowCall",
-  logoUrl: loadLogoDataUri(),
+  logoUrl: env.BRAND_LOGO_URL ?? "https://chowcall.vercel.app/chowcall-logo.png",
   background: "#f7f1e8",
   card: "#fffaf2",
   text: "#221817",
