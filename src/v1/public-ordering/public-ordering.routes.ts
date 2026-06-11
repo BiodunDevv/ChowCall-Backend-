@@ -12,12 +12,70 @@ import type { DeliveryPricingConfig, ServiceFeeConfig } from "../pricing/pricing
 
 export const publicOrderingRouter = Router();
 
+function publicTenantPayload(tenant: {
+  id?: string;
+  _id?: unknown;
+  name: string;
+  slug: string;
+  logo?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  openingHours?: unknown;
+  subscriptionStatus?: string;
+  voice?: { greeting?: string | null; routingNumber?: string | null; dedicatedNumber?: string | null } | null;
+  onboarding?: { status?: string | null } | null;
+}) {
+  return {
+    id: tenant.id ?? String(tenant._id ?? ""),
+    name: tenant.name,
+    slug: tenant.slug,
+    logo: tenant.logo ?? null,
+    phone: tenant.voice?.routingNumber ?? tenant.voice?.dedicatedNumber ?? tenant.phone ?? null,
+    address: tenant.address ?? null,
+    openingHours: tenant.openingHours ?? {},
+    aiGreeting:
+      tenant.voice?.greeting ??
+      `Hi, welcome to ${tenant.name}. Are you ordering for pickup or delivery today?`,
+    subscriptionStatus: tenant.subscriptionStatus,
+    active: tenant.subscriptionStatus === "active" || tenant.onboarding?.status === "live",
+  };
+}
+
+async function resolvePublicTenant(tenantSlug: string) {
+  const tenant = await Tenant.findOne({ slug: tenantSlug }).lean();
+  if (!tenant) throw new AppError(404, "Restaurant not found", "TENANT_NOT_FOUND");
+  const payload = publicTenantPayload(tenant);
+  if (!payload.active) throw new AppError(404, "Restaurant is not active yet", "TENANT_INACTIVE");
+  return { tenant, payload };
+}
+
+publicOrderingRouter.get("/:tenantSlug", async (req, res, next) => {
+  try {
+    const { payload } = await resolvePublicTenant(req.params.tenantSlug);
+    res.json({ data: payload });
+  } catch (error) {
+    next(error);
+  }
+});
+
 publicOrderingRouter.get("/:tenantSlug/menu", async (req, res, next) => {
   try {
-    const tenant = await Tenant.findOne({ slug: req.params.tenantSlug });
-    if (!tenant) throw new AppError(404, "Tenant not found", "TENANT_NOT_FOUND");
-    const items = await MenuItem.find({ tenantId: tenant._id, available: true });
-    res.json({ tenant: { name: tenant.name, slug: tenant.slug }, data: items });
+    const { tenant, payload } = await resolvePublicTenant(req.params.tenantSlug);
+    const items = await MenuItem.find({ tenantId: tenant._id }).sort({ category: 1, name: 1 }).lean();
+    res.json({ tenant: payload, data: items });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.post("/:tenantSlug/chat", async (req, res, next) => {
+  try {
+    const { payload } = await resolvePublicTenant(req.params.tenantSlug);
+    const message = String(req.body?.message ?? "").trim();
+    const reply = message
+      ? "Got it. I can help build your order from the menu, confirm pickup or delivery, then calculate the total before payment."
+      : payload.aiGreeting;
+    res.json({ data: { reply, tenant: payload } });
   } catch (error) {
     next(error);
   }
@@ -25,8 +83,7 @@ publicOrderingRouter.get("/:tenantSlug/menu", async (req, res, next) => {
 
 publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
   try {
-    const tenant = await Tenant.findOne({ slug: req.params.tenantSlug }).lean();
-    if (!tenant) throw new AppError(404, "Tenant not found", "TENANT_NOT_FOUND");
+    const { tenant } = await resolvePublicTenant(req.params.tenantSlug);
 
     const priced = priceOrder({
       fulfilmentType: req.body.fulfilmentType ?? "delivery",
@@ -51,8 +108,7 @@ publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
 
 publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
   try {
-    const tenant = await Tenant.findOne({ slug: req.params.tenantSlug });
-    if (!tenant) throw new AppError(404, "Tenant not found", "TENANT_NOT_FOUND");
+    const { tenant } = await resolvePublicTenant(req.params.tenantSlug);
 
     const priced = priceOrder({
       fulfilmentType: req.body.fulfilmentType ?? "delivery",
@@ -64,8 +120,9 @@ publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
       serviceFee: tenant.serviceFee as unknown as ServiceFeeConfig,
     });
 
+    const tenantId = String(tenant._id);
     const order = await Order.create({
-      tenantId: tenant.id,
+      tenantId,
       source: "web",
       status: tenant.payment?.payOnDeliveryEnabled ? "CONFIRMED" : "PENDING_PAYMENT",
       customer: req.body.customer,
@@ -87,11 +144,11 @@ publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
       email: req.body.customer?.email,
       phone: req.body.customer?.phone,
       reference,
-      metadata: { orderId: order.id, tenantId: tenant.id, source: "public_ordering" },
+      metadata: { orderId: order.id, tenantId, source: "public_ordering" },
     });
 
     const payment = await Payment.create({
-      tenantId: tenant.id,
+      tenantId,
       orderId: order.id,
       provider: link.provider,
       reference: link.reference,
@@ -113,6 +170,43 @@ publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
         payment,
         paymentRequired: true,
         authorizationUrl: link.authorizationUrl,
+        statusUrl: `/order/${tenant.slug}/status/${order.id}`,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.get("/:tenantSlug/orders/:orderId/status", async (req, res, next) => {
+  try {
+    const { tenant, payload } = await resolvePublicTenant(req.params.tenantSlug);
+    const order = await Order.findOne({ _id: req.params.orderId, tenantId: tenant._id }).lean();
+    if (!order) throw new AppError(404, "Order not found", "ORDER_NOT_FOUND");
+    const payment = await Payment.findOne({ orderId: order._id, tenantId: tenant._id }).lean();
+    res.json({
+      data: {
+        tenant: payload,
+        order: {
+          id: String(order._id),
+          orderNumber: order.orderNumber,
+          status: order.status,
+          source: order.source,
+          fulfilmentType: order.fulfilmentType,
+          customer: {
+            name: order.customer?.name,
+            phone: order.customer?.phone,
+            address: order.customer?.address,
+            landmark: order.customer?.landmark,
+          },
+          items: order.items,
+          pricing: order.pricing,
+          payment: {
+            reference: order.payment?.reference,
+            paidAt: order.payment?.paidAt,
+            status: payment?.status ?? (order.payment?.paidAt ? "paid" : "pending"),
+          },
+        },
       },
     });
   } catch (error) {

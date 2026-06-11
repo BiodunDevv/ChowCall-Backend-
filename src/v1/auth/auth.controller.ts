@@ -4,7 +4,7 @@ import { User } from "../users/user.model.js";
 import { AppError } from "../../shared/errors/app-error.js";
 import { comparePassword, hashPassword } from "../../shared/security/password.js";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../../shared/security/jwt.js";
-import { loginSchema, registerSchema, securitySettingsSchema, verifyOtpSchema } from "./auth.schemas.js";
+import { loginSchema, registerSchema, reservedTenantSlugs, securitySettingsSchema, verifyOtpSchema } from "./auth.schemas.js";
 import type { Role } from "../../shared/constants/roles.js";
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import { env } from "../../config/env.js";
@@ -350,6 +350,9 @@ function parseCookie(header: string) {
 async function uniqueTenantSlug(name: string) {
   const base =
     name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "restaurant";
+  if (reservedTenantSlugs.has(base)) {
+    throw new AppError(400, "This tenant URL is reserved", "RESERVED_TENANT_SLUG");
+  }
   let slug = base;
   let suffix = 1;
   while (await Tenant.exists({ slug })) slug = `${base}-${suffix++}`;

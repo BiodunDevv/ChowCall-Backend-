@@ -1,11 +1,41 @@
 import { z } from "zod";
 
+export const reservedTenantSlugs = new Set([
+  "admin",
+  "api",
+  "app",
+  "login",
+  "register",
+  "dashboard",
+  "super-admin",
+  "order",
+  "menu",
+  "store",
+  "pricing",
+  "about",
+  "contact",
+  "demo",
+  "terms",
+  "privacy",
+  "support",
+  "help",
+  "settings",
+  "billing",
+]);
+
+export const tenantSlugSchema = z
+  .string()
+  .trim()
+  .min(2)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "Use lowercase letters, numbers, and hyphens only")
+  .refine((slug) => !reservedTenantSlugs.has(slug), "This tenant URL is reserved");
+
 export const registerSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(8),
   tenantName: z.string().min(2),
-  slug: z.string().trim().min(2).optional(),
+  slug: tenantSlugSchema.optional(),
   phone: z.string().optional(),
   twoFactorEnabled: z.boolean().optional(),
 });
