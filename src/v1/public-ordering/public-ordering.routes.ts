@@ -9,6 +9,13 @@ import { Payment } from "../payments/payment.model.js";
 import { createReference } from "../../shared/utils/reference.js";
 import { env } from "../../config/env.js";
 import type { DeliveryPricingConfig, ServiceFeeConfig } from "../pricing/pricing.types.js";
+import {
+  createOrderFromSession,
+  createPublicPaymentLink,
+  handleOrderingMessage,
+  startOrderingSession,
+  verifyPublicOrderAccess,
+} from "../ai-ordering/ai-ordering-engine.js";
 
 export const publicOrderingRouter = Router();
 
@@ -25,6 +32,7 @@ function publicTenantPayload(tenant: {
   voice?: { greeting?: string | null; routingNumber?: string | null; dedicatedNumber?: string | null } | null;
   aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
   onboarding?: { status?: string | null } | null;
+  coverImageUrl?: string | null;
   heroImageLightUrl?: string | null;
   heroImageDarkUrl?: string | null;
   heroHeadline?: string | null;
@@ -60,6 +68,7 @@ function publicTenantPayload(tenant: {
     },
     subscriptionStatus: tenant.subscriptionStatus,
     active: tenant.subscriptionStatus === "active" || tenant.onboarding?.status === "live",
+    coverImageUrl: tenant.coverImageUrl ?? null,
     heroImageLightUrl: tenant.heroImageLightUrl ?? null,
     heroImageDarkUrl: tenant.heroImageDarkUrl ?? null,
     heroHeadline: tenant.heroHeadline ?? null,
@@ -109,12 +118,93 @@ publicOrderingRouter.get("/:tenantSlug/menu", async (req, res, next) => {
 
 publicOrderingRouter.post("/:tenantSlug/chat", async (req, res, next) => {
   try {
-    const { payload } = await resolvePublicTenant(req.params.tenantSlug);
     const message = String(req.body?.message ?? "").trim();
-    const reply = message
-      ? "Got it. I can help build your order from the menu, confirm pickup or delivery, then calculate the total before payment."
-      : payload.aiGreeting;
-    res.json({ data: { reply, tenant: payload } });
+    if (!message) {
+      const data = await startOrderingSession(req.params.tenantSlug);
+      res.json({ data: { ...data, reply: data.assistantMessage } });
+      return;
+    }
+    const data = await handleOrderingMessage({
+      tenantSlug: req.params.tenantSlug,
+      sessionId: req.body?.sessionId,
+      message,
+    });
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.post("/:tenantSlug/chat/session", async (req, res, next) => {
+  try {
+    const data = await startOrderingSession(req.params.tenantSlug);
+    res.status(201).json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.post("/:tenantSlug/chat/message", async (req, res, next) => {
+  try {
+    const message = String(req.body?.message ?? "").trim();
+    if (!message) throw new AppError(400, "Message is required.", "CHAT_MESSAGE_REQUIRED");
+    const data = await handleOrderingMessage({
+      tenantSlug: req.params.tenantSlug,
+      sessionId: req.body?.sessionId,
+      message,
+    });
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.post("/:tenantSlug/orders", async (req, res, next) => {
+  try {
+    const sessionId = String(req.body?.sessionId ?? "");
+    if (!sessionId) throw new AppError(400, "Session id is required.", "CHAT_SESSION_REQUIRED");
+    const data = await createOrderFromSession({
+      tenantSlug: req.params.tenantSlug,
+      sessionId,
+      customer: req.body?.customer,
+    });
+    res.status(201).json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.post("/:tenantSlug/orders/:orderId/confirm", async (req, res, next) => {
+  try {
+    const { tenant } = await resolvePublicTenant(req.params.tenantSlug);
+    const order = await Order.findOne({ _id: req.params.orderId, tenantId: tenant._id }).select("+publicStatusTokenHash");
+    if (!order) throw new AppError(404, "Order not found", "ORDER_NOT_FOUND");
+    if (
+      !verifyPublicOrderAccess(order as unknown as { publicStatusTokenHash?: string; customer?: { phone?: string } }, {
+        token: String(req.body?.token ?? req.query.token ?? ""),
+        phone: String(req.body?.phone ?? ""),
+      })
+    ) {
+      throw new AppError(403, "Order status token or phone verification is required.", "ORDER_STATUS_ACCESS_DENIED");
+    }
+    if (order.status === "PRICED") {
+      order.status = "PENDING_PAYMENT";
+      await order.save();
+    }
+    res.json({ data: { order } });
+  } catch (error) {
+    next(error);
+  }
+});
+
+publicOrderingRouter.post("/:tenantSlug/orders/:orderId/payment-link", async (req, res, next) => {
+  try {
+    const data = await createPublicPaymentLink({
+      tenantSlug: req.params.tenantSlug,
+      orderId: req.params.orderId,
+      statusToken: String(req.body?.token ?? req.query.token ?? ""),
+    });
+    res.status(201).json({ data });
   } catch (error) {
     next(error);
   }
@@ -220,8 +310,16 @@ publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
 publicOrderingRouter.get("/:tenantSlug/orders/:orderId/status", async (req, res, next) => {
   try {
     const { tenant, payload } = await resolvePublicTenant(req.params.tenantSlug);
-    const order = await Order.findOne({ _id: req.params.orderId, tenantId: tenant._id }).lean();
+    const order = await Order.findOne({ _id: req.params.orderId, tenantId: tenant._id }).select("+publicStatusTokenHash").lean();
     if (!order) throw new AppError(404, "Order not found", "ORDER_NOT_FOUND");
+    if (
+      !verifyPublicOrderAccess(order as unknown as { publicStatusTokenHash?: string; customer?: { phone?: string } }, {
+        token: String(req.query.token ?? ""),
+        phone: String(req.query.phone ?? ""),
+      })
+    ) {
+      throw new AppError(403, "Order status token or phone verification is required.", "ORDER_STATUS_ACCESS_DENIED");
+    }
     const payment = await Payment.findOne({ orderId: order._id, tenantId: tenant._id }).lean();
     res.json({
       data: {

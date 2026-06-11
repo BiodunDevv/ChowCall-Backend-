@@ -2,6 +2,7 @@ export const orderStatuses = [
   "DRAFT",
   "PRICED",
   "PENDING_PAYMENT",
+  "PAID",
   "CONFIRMED",
   "SENT_TO_KITCHEN",
   "PREPARING",

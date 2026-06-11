@@ -20,10 +20,11 @@ const orderSchema = new Schema(
   {
     ...tenantFields,
     orderNumber: { type: String, index: true },
-    source: { type: String, enum: ["voice", "web", "dashboard", "whatsapp"], default: "voice" },
+    source: { type: String, enum: ["voice", "web", "chat", "dashboard", "whatsapp"], default: "voice" },
     status: { type: String, enum: orderStatuses, default: "DRAFT", index: true },
     customer: {
       name: String,
+      email: String,
       phone: String,
       address: String,
       landmark: String,
@@ -49,6 +50,7 @@ const orderSchema = new Schema(
       paidAt: Date,
       expiresAt: Date,
     },
+    publicStatusTokenHash: { type: String, select: false },
     kitchenTicketSentAt: Date,
     escalationId: { type: Schema.Types.ObjectId, ref: "Escalation" },
   },

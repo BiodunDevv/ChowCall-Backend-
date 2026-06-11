@@ -186,7 +186,7 @@ async function seed() {
       tenantId: demoTenant._id,
       orderNumber: "ORD-0001",
       source: "web",
-      status: "CONFIRMED",
+      status: "PAID",
       customer: { name: "Tunde Bakare", phone: "+2348012345678", address: "5 Broad Street, Lagos Island" },
       fulfilmentType: "delivery",
       items: [
@@ -233,7 +233,7 @@ async function seed() {
   console.log("Super admin:    louisdiaz43@gmail.com       / 123456");
   console.log("Tenant owner:   muhammedabiodun42@gmail.com / 123456");
   console.log("Demo tenant:    mamaskitchen (active, live)");
-  console.log("Menu items: 6, Orders: 3");
+  console.log("Menu items: 9, Orders: 3");
 
   await mongoose.disconnect();
   process.exit(0);

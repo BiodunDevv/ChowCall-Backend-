@@ -31,6 +31,7 @@ import { createReference } from "../../shared/utils/reference.js";
 import { tenantQuery } from "../../shared/utils/tenant-query.js";
 import { Payment } from "./payment.model.js";
 import { Order } from "../orders/order.model.js";
+import { sendKitchenTicketForOrder } from "../ai-ordering/kitchen-ticket.service.js";
 
 export const paymentRouter = Router();
 
@@ -103,9 +104,10 @@ paymentRouter.get("/:reference/verify", requireAuth, requireTenant, async (req, 
     payment.paidAt = new Date();
     await payment.save();
     await Order.findByIdAndUpdate(payment.orderId, {
-      status: "CONFIRMED",
+      status: "PAID",
       "payment.paidAt": payment.paidAt,
     });
+    await sendKitchenTicketForOrder(String(payment.orderId));
   }
 
   res.json({ data: { paid: result.paid, payment, raw: result.raw } });
@@ -141,9 +143,10 @@ paymentRouter.post("/webhooks/paystack", async (req, res) => {
       payment.rawWebhookEventIds.push(eventId);
       await payment.save();
       await Order.findByIdAndUpdate(payment.orderId, {
-        status: "CONFIRMED",
+        status: "PAID",
         "payment.paidAt": payment.paidAt,
       });
+      await sendKitchenTicketForOrder(String(payment.orderId));
     }
 
     // Subscription payment — auto-activate if reference matches pending sub
@@ -184,9 +187,10 @@ paymentRouter.post("/webhooks/flutterwave", async (req, res) => {
       payment.rawWebhookEventIds.push(eventId);
       await payment.save();
       await Order.findByIdAndUpdate(payment.orderId, {
-        status: "CONFIRMED",
+        status: "PAID",
         "payment.paidAt": payment.paidAt,
       });
+      await sendKitchenTicketForOrder(String(payment.orderId));
     }
 
     // Subscription payment — handled in subscription.routes but we sync here too

@@ -7,6 +7,7 @@ Use this guide to fill `ChowCall-Backend/.env` from `.env.example`.
 - `NODE_ENV`: Use `development`, `test`, or `production`.
 - `PORT`: Local API port. Default: `4000`.
 - `API_BASE_URL`: Public backend URL, for example `http://localhost:4000` locally or your deployed API URL.
+- `BACKEND_BASE_URL`: Canonical backend URL used for provider callbacks and generated webhook references.
 - `APP_NAME`: Display name for logs and Swagger.
 - `FRONTEND_BASE_URL`: Next.js frontend URL. Local default: `http://localhost:3000`.
 - `BRAND_LOGO_URL`: Public HTTPS URL for `chowcall-logo.svg`. In production, upload the frontend/public logo or serve it from your domain/CDN.
@@ -76,6 +77,7 @@ https://your-api-domain.com/v1/payments/webhooks/paystack
 
 Set:
 
+- `PAYMENT_PROVIDER=paystack`
 - `PAYSTACK_SECRET_KEY`
 - `PAYSTACK_PUBLIC_KEY`
 - `PAYSTACK_WEBHOOK_SECRET`
@@ -146,6 +148,11 @@ SMS provider default: Twilio.
    - `TWILIO_ACCOUNT_SID=your_twilio_account_sid`
    - `TWILIO_AUTH_TOKEN=your_twilio_auth_token`
    - `TWILIO_FROM_NUMBER=+10000000000`
+   - `TWILIO_VOICE_WEBHOOK_URL=https://your-api-domain.com/v1/voice/incoming`
+   - `TWILIO_STATUS_CALLBACK_URL=https://your-api-domain.com/v1/voice/status`
+   - `VOICE_MODE=gather`
+
+Voice ordering starts in Twilio gather mode. Set `TWILIO_MEDIA_STREAM_URL` and `VOICE_MODE=media_stream` only when realtime media streaming is configured; otherwise ChowCall falls back to gather mode.
 
 For trial Twilio accounts, the recipient number must usually be verified in Twilio before test messages can be delivered.
 

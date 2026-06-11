@@ -714,6 +714,39 @@ export const openApiDocument = {
         responses: ok("Public menu"),
       },
     },
+    "/v1/public-ordering/{tenantSlug}/chat/session": {
+      post: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Start a backend AI ordering session for chat or customer web ordering.",
+        parameters: [{ name: "tenantSlug", in: "path", required: true, schema: { type: "string" } }],
+        responses: created("AI ordering session started"),
+      },
+    },
+    "/v1/public-ordering/{tenantSlug}/chat/message": {
+      post: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Send a customer message to the shared AI ordering engine.",
+        parameters: [{ name: "tenantSlug", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["message"],
+                properties: {
+                  sessionId: { type: "string" },
+                  message: { type: "string", example: "I want 2 jollof rice for delivery" },
+                },
+              },
+            },
+          },
+        },
+        responses: ok("AI ordering engine response"),
+      },
+    },
     "/v1/public-ordering/{tenantSlug}/quote": {
       post: {
         tags: ["Public Ordering"],
@@ -738,6 +771,95 @@ export const openApiDocument = {
           content: { "application/json": { schema: { $ref: "#/components/schemas/OrderCreateRequest" } } },
         },
         responses: created("Public checkout created"),
+      },
+    },
+    "/v1/public-ordering/{tenantSlug}/orders": {
+      post: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Create an order from a validated AI ordering session.",
+        parameters: [{ name: "tenantSlug", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                required: ["sessionId"],
+                properties: {
+                  sessionId: { type: "string" },
+                  customer: { type: "object" },
+                },
+              },
+            },
+          },
+        },
+        responses: created("Public AI order created"),
+      },
+    },
+    "/v1/public-ordering/{tenantSlug}/orders/{orderId}/payment-link": {
+      post: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Create a payment link for a public AI order.",
+        parameters: [
+          { name: "tenantSlug", in: "path", required: true, schema: { type: "string" } },
+          { name: "orderId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: { type: "object", properties: { token: { type: "string" } } },
+            },
+          },
+        },
+        responses: created("Payment link created"),
+      },
+    },
+    "/v1/public-ordering/{tenantSlug}/orders/{orderId}/status": {
+      get: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Fetch customer-safe order status by secure token or phone verification.",
+        parameters: [
+          { name: "tenantSlug", in: "path", required: true, schema: { type: "string" } },
+          { name: "orderId", in: "path", required: true, schema: { type: "string" } },
+          { name: "token", in: "query", required: false, schema: { type: "string" } },
+          { name: "phone", in: "query", required: false, schema: { type: "string" } },
+        ],
+        responses: ok("Customer-safe order status"),
+      },
+    },
+    "/v1/voice/incoming": {
+      post: {
+        tags: ["Voice"],
+        security: publicSecurity,
+        summary: "Twilio incoming-call webhook for gather-mode AI ordering.",
+        responses: ok("TwiML response"),
+      },
+    },
+    "/v1/voice/gather": {
+      post: {
+        tags: ["Voice"],
+        security: publicSecurity,
+        summary: "Twilio gather webhook that sends transcript text to the shared ordering engine.",
+        responses: ok("TwiML response"),
+      },
+    },
+    "/v1/voice/status": {
+      post: {
+        tags: ["Voice"],
+        security: publicSecurity,
+        summary: "Twilio call status callback.",
+        responses: ok("Status callback accepted"),
+      },
+    },
+    "/v1/voice/recording": {
+      post: {
+        tags: ["Voice"],
+        security: publicSecurity,
+        summary: "Twilio recording callback scaffold.",
+        responses: ok("Recording callback accepted"),
       },
     },
   },

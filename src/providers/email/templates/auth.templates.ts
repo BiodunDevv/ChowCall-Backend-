@@ -79,12 +79,13 @@ export function staffInviteEmail(input: {
   inviteUrl: string;
 }) {
   const roleLabel = input.role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+  const roleText = input.role.replace(/_/g, " ");
   return renderEmailLayout({
     previewText: `${input.inviterName} invited you to join ${input.tenantName} on ChowCall.`,
     eyebrow: "Staff invite",
     title: `Join ${input.tenantName}`,
     body: [
-      `${input.inviterName} has invited you to ChowCall as ${roleLabel} at ${input.tenantName}.`,
+      `${input.inviterName} has invited you to ChowCall as ${roleText} at ${input.tenantName}.`,
       "Accept the invite to access the restaurant workspace and start managing orders.",
     ].join("\n"),
     action: { label: "Accept invite", href: input.inviteUrl },
