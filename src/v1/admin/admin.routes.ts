@@ -3,12 +3,151 @@ import { z } from "zod";
 import { requireAuth } from "../../shared/middleware/auth.js";
 import { requireRoles } from "../../shared/middleware/rbac.js";
 import { Tenant } from "../tenants/tenant.model.js";
+import { Order } from "../orders/order.model.js";
+import { Payment } from "../payments/payment.model.js";
 import { env } from "../../config/env.js";
 
 export const adminRouter = Router();
 
+type PlatformDashboardOrder = {
+  _id: unknown;
+  orderNumber?: string;
+  status?: string;
+  source?: string;
+  fulfilmentType?: string;
+  customer?: { name?: string };
+  pricing?: { totalPayable?: number };
+  payment?: { paidAt?: Date };
+  createdAt?: Date;
+};
+
 // All admin routes require platform_owner or platform_admin
 adminRouter.use(requireAuth, requireRoles("platform_owner", "platform_admin"));
+
+adminRouter.get("/dashboard", async (_req, res, next) => {
+  try {
+    const now = new Date();
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const weekStart = new Date(todayStart);
+    weekStart.setDate(todayStart.getDate() - todayStart.getDay());
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+
+    const dayLabels: string[] = [];
+    const dayStarts: Date[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date(todayStart);
+      d.setDate(todayStart.getDate() - i);
+      dayLabels.push(d.toLocaleDateString("en-NG", { weekday: "short" }));
+      dayStarts.push(d);
+    }
+
+    const [allOrders, recentOrderDocs, tenantCount, activeTenantCount, paidPayments] =
+      await Promise.all([
+        Order.find().lean(),
+        Order.find()
+          .sort({ createdAt: -1 })
+          .limit(10)
+          .select("orderNumber status source fulfilmentType customer pricing payment createdAt tenantId")
+          .lean(),
+        Tenant.countDocuments(),
+        Tenant.countDocuments({
+          $or: [{ subscriptionStatus: "active" }, { "onboarding.status": "live" }],
+        }),
+        Payment.find({ status: "paid" }).select("amount currency createdAt").lean(),
+      ]);
+
+    let todayOrders = 0;
+    let todayRevenue = 0;
+    let todayPending = 0;
+    let weekOrders = 0;
+    let weekRevenue = 0;
+    let monthOrders = 0;
+    let monthRevenue = 0;
+    let totalRevenue = 0;
+    const statusCounts: Record<string, number> = {};
+    const sourceCounts: Record<string, number> = {};
+    const chartMap: Record<string, { revenue: number; orders: number }> = {};
+
+    for (const d of dayStarts) {
+      chartMap[d.toISOString().slice(0, 10)] = { revenue: 0, orders: 0 };
+    }
+
+    for (const order of allOrders as PlatformDashboardOrder[]) {
+      const createdAt = new Date(order.createdAt as Date);
+      const payable = order.pricing?.totalPayable ?? 0;
+      const paid = order.payment?.paidAt != null;
+
+      if (paid) totalRevenue += payable;
+      if (createdAt >= todayStart) {
+        todayOrders++;
+        if (paid) todayRevenue += payable;
+        if (order.status === "PENDING_PAYMENT") todayPending++;
+      }
+      if (createdAt >= weekStart) {
+        weekOrders++;
+        if (paid) weekRevenue += payable;
+      }
+      if (createdAt >= monthStart) {
+        monthOrders++;
+        if (paid) monthRevenue += payable;
+      }
+
+      const status = String(order.status ?? "unknown");
+      const source = String(order.source ?? "unknown");
+      statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+      sourceCounts[source] = (sourceCounts[source] ?? 0) + 1;
+
+      const key = createdAt.toISOString().slice(0, 10);
+      if (chartMap[key]) {
+        chartMap[key].orders++;
+        if (paid) chartMap[key].revenue += payable;
+      }
+    }
+
+    const revenueChart = dayStarts.map((d, i) => {
+      const key = d.toISOString().slice(0, 10);
+      return {
+        date: dayLabels[i],
+        revenue: chartMap[key]?.revenue ?? 0,
+        orders: chartMap[key]?.orders ?? 0,
+      };
+    });
+
+    const recentOrders = (recentOrderDocs as PlatformDashboardOrder[]).map((order) => ({
+      id: String(order._id),
+      orderNumber: order.orderNumber ?? "",
+      status: order.status ?? "",
+      source: order.source ?? "",
+      fulfilmentType: order.fulfilmentType ?? "",
+      customerName: order.customer?.name ?? "",
+      totalPayable: order.pricing?.totalPayable ?? 0,
+      createdAt: order.createdAt,
+    }));
+
+    res.json({
+      data: {
+        todayOrders,
+        todayRevenue,
+        todayPending,
+        weekOrders,
+        weekRevenue,
+        monthOrders,
+        monthRevenue,
+        totalOrders: allOrders.length,
+        totalRevenue,
+        tenantCount,
+        activeTenantCount,
+        paidPaymentCount: paidPayments.length,
+        recentOrders,
+        statusCounts,
+        sourceCounts,
+        revenueChart,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
 
 // ── Platform general settings ────────────────────────────────────────────────
 // In a real deployment these would persist to a PlatformConfig model.

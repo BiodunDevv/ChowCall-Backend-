@@ -23,7 +23,19 @@ function publicTenantPayload(tenant: {
   openingHours?: unknown;
   subscriptionStatus?: string;
   voice?: { greeting?: string | null; routingNumber?: string | null; dedicatedNumber?: string | null } | null;
+  aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
   onboarding?: { status?: string | null } | null;
+  coverImageUrl?: string | null;
+  description?: string | null;
+  category?: string | null;
+  instagramUrl?: string | null;
+  whatsappNumber?: string | null;
+  bannerText?: string | null;
+  bannerEnabled?: boolean | null;
+  showPopularItems?: boolean | null;
+  pickupEnabled?: boolean | null;
+  deliveryEnabled?: boolean | null;
+  estimatedPrepTime?: number | null;
 }) {
   return {
     id: tenant.id ?? String(tenant._id ?? ""),
@@ -36,8 +48,23 @@ function publicTenantPayload(tenant: {
     aiGreeting:
       tenant.voice?.greeting ??
       `Hi, welcome to ${tenant.name}. Are you ordering for pickup or delivery today?`,
+    aiAgent: {
+      enabled: tenant.aiAgent?.enabled !== false,
+      instructions: tenant.aiAgent?.instructions ?? "",
+    },
     subscriptionStatus: tenant.subscriptionStatus,
     active: tenant.subscriptionStatus === "active" || tenant.onboarding?.status === "live",
+    coverImageUrl: tenant.coverImageUrl ?? null,
+    description: tenant.description ?? null,
+    category: tenant.category ?? null,
+    instagramUrl: tenant.instagramUrl ?? null,
+    whatsappNumber: tenant.whatsappNumber ?? null,
+    bannerText: tenant.bannerText ?? null,
+    bannerEnabled: tenant.bannerEnabled ?? false,
+    showPopularItems: tenant.showPopularItems ?? true,
+    pickupEnabled: tenant.pickupEnabled ?? true,
+    deliveryEnabled: tenant.deliveryEnabled ?? true,
+    estimatedPrepTime: tenant.estimatedPrepTime ?? null,
   };
 }
 

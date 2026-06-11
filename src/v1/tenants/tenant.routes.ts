@@ -158,11 +158,51 @@ const aiAgentSchema = z.object({
   instructions: z.string().optional(),
 });
 
+const publicPageSchema = z.object({
+  coverImageUrl: z.string().url().optional().or(z.literal("")),
+  description: z.string().max(600).optional().or(z.literal("")),
+  category: z.string().max(80).optional().or(z.literal("")),
+  instagramUrl: z.string().url().optional().or(z.literal("")),
+  whatsappNumber: z.string().max(32).optional().or(z.literal("")),
+  bannerText: z.string().max(140).optional().or(z.literal("")),
+  bannerEnabled: z.boolean().optional(),
+  showPopularItems: z.boolean().optional(),
+  pickupEnabled: z.boolean().optional(),
+  deliveryEnabled: z.boolean().optional(),
+  estimatedPrepTime: z.number().int().min(0).max(240).optional().nullable(),
+});
+
+const publicPageSelect =
+  "coverImageUrl description category instagramUrl whatsappNumber bannerText bannerEnabled showPopularItems pickupEnabled deliveryEnabled estimatedPrepTime";
+
+function normalizeAiAgent(aiAgent?: { enabled?: boolean; instructions?: string } | null) {
+  return {
+    enabled: aiAgent?.enabled !== false,
+    instructions: aiAgent?.instructions ?? "",
+  };
+}
+
+function normalizePublicPage(input: z.infer<typeof publicPageSchema>) {
+  return {
+    coverImageUrl: input.coverImageUrl?.trim() || undefined,
+    description: input.description?.trim() || "",
+    category: input.category?.trim() || "",
+    instagramUrl: input.instagramUrl?.trim() || "",
+    whatsappNumber: input.whatsappNumber?.trim() || "",
+    bannerText: input.bannerText?.trim() || "",
+    bannerEnabled: input.bannerEnabled ?? false,
+    showPopularItems: input.showPopularItems ?? true,
+    pickupEnabled: input.pickupEnabled ?? true,
+    deliveryEnabled: input.deliveryEnabled ?? true,
+    estimatedPrepTime: input.estimatedPrepTime ?? undefined,
+  };
+}
+
 tenantRouter.get("/current/ai-agent", requireTenant, async (req, res) => {
   const tenant = await Tenant.findById(req.user!.tenantId)
     .select("aiAgent")
-    .lean() as { aiAgent?: unknown } | null;
-  res.json({ data: (tenant as Record<string, unknown>)?.aiAgent ?? { enabled: false } });
+    .lean() as { aiAgent?: { enabled?: boolean; instructions?: string } } | null;
+  res.json({ data: normalizeAiAgent(tenant?.aiAgent) });
 });
 
 tenantRouter.patch(
@@ -174,10 +214,86 @@ tenantRouter.patch(
       const payload = aiAgentSchema.parse(req.body);
       const tenant = await Tenant.findByIdAndUpdate(
         req.user!.tenantId,
-        { aiAgent: payload },
+        { aiAgent: normalizeAiAgent(payload) },
         { new: true },
       ).select("aiAgent");
-      res.json({ data: (tenant as unknown as Record<string, unknown>)?.aiAgent ?? {} });
+      res.json({ data: normalizeAiAgent((tenant as { aiAgent?: { enabled?: boolean; instructions?: string } } | null)?.aiAgent) });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+// ── Public AI page config ────────────────────────────────────────────────────
+
+tenantRouter.get("/current/public-page", requireTenant, async (req, res) => {
+  const tenant = await Tenant.findById(req.user!.tenantId).select(publicPageSelect).lean();
+  res.json({
+    data: {
+      coverImageUrl: tenant?.coverImageUrl ?? "",
+      description: tenant?.description ?? "",
+      category: tenant?.category ?? "",
+      instagramUrl: tenant?.instagramUrl ?? "",
+      whatsappNumber: tenant?.whatsappNumber ?? "",
+      bannerText: tenant?.bannerText ?? "",
+      bannerEnabled: tenant?.bannerEnabled ?? false,
+      showPopularItems: tenant?.showPopularItems ?? true,
+      pickupEnabled: tenant?.pickupEnabled ?? true,
+      deliveryEnabled: tenant?.deliveryEnabled ?? true,
+      estimatedPrepTime: tenant?.estimatedPrepTime ?? undefined,
+    },
+  });
+});
+
+tenantRouter.patch(
+  "/current/public-page",
+  requireTenant,
+  requireRoles("tenant_owner", "tenant_admin", "manager"),
+  async (req, res, next) => {
+    try {
+      const payload = normalizePublicPage(publicPageSchema.parse(req.body));
+      const tenant = await Tenant.findByIdAndUpdate(req.user!.tenantId, payload, {
+        new: true,
+        runValidators: true,
+      }).select(publicPageSelect);
+      res.json({ data: tenant });
+    } catch (err) {
+      next(err);
+    }
+  },
+);
+
+tenantRouter.get("/current/storefront", requireTenant, async (req, res) => {
+  const tenant = await Tenant.findById(req.user!.tenantId).select(publicPageSelect).lean();
+  res.json({
+    data: {
+      coverImageUrl: tenant?.coverImageUrl ?? "",
+      description: tenant?.description ?? "",
+      category: tenant?.category ?? "",
+      instagramUrl: tenant?.instagramUrl ?? "",
+      whatsappNumber: tenant?.whatsappNumber ?? "",
+      bannerText: tenant?.bannerText ?? "",
+      bannerEnabled: tenant?.bannerEnabled ?? false,
+      showPopularItems: tenant?.showPopularItems ?? true,
+      pickupEnabled: tenant?.pickupEnabled ?? true,
+      deliveryEnabled: tenant?.deliveryEnabled ?? true,
+      estimatedPrepTime: tenant?.estimatedPrepTime ?? undefined,
+    },
+  });
+});
+
+tenantRouter.patch(
+  "/current/storefront",
+  requireTenant,
+  requireRoles("tenant_owner", "tenant_admin", "manager"),
+  async (req, res, next) => {
+    try {
+      const payload = normalizePublicPage(publicPageSchema.parse(req.body));
+      const tenant = await Tenant.findByIdAndUpdate(req.user!.tenantId, payload, {
+        new: true,
+        runValidators: true,
+      }).select(publicPageSelect);
+      res.json({ data: tenant });
     } catch (err) {
       next(err);
     }
