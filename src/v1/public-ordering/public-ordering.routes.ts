@@ -25,7 +25,8 @@ function publicTenantPayload(tenant: {
   voice?: { greeting?: string | null; routingNumber?: string | null; dedicatedNumber?: string | null } | null;
   aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
   onboarding?: { status?: string | null } | null;
-  coverImageUrl?: string | null;
+  heroImageLightUrl?: string | null;
+  heroImageDarkUrl?: string | null;
   heroHeadline?: string | null;
   description?: string | null;
   category?: string | null;
@@ -59,7 +60,8 @@ function publicTenantPayload(tenant: {
     },
     subscriptionStatus: tenant.subscriptionStatus,
     active: tenant.subscriptionStatus === "active" || tenant.onboarding?.status === "live",
-    coverImageUrl: tenant.coverImageUrl ?? null,
+    heroImageLightUrl: tenant.heroImageLightUrl ?? null,
+    heroImageDarkUrl: tenant.heroImageDarkUrl ?? null,
     heroHeadline: tenant.heroHeadline ?? null,
     description: tenant.description ?? null,
     category: tenant.category ?? null,

@@ -77,6 +77,8 @@ const tenantSchema = new Schema(
       instructions: { type: String, default: "" },
     },
     coverImageUrl: { type: String },
+    heroImageLightUrl: { type: String },
+    heroImageDarkUrl: { type: String },
     heroHeadline: { type: String },
     description: { type: String },
     category: { type: String },

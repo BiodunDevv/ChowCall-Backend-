@@ -163,7 +163,8 @@ const aiAgentSchema = z.object({
 
 const publicPageSchema = z.object({
   logoUrl: z.string().url().optional().or(z.literal("")),
-  coverImageUrl: z.string().url().optional().or(z.literal("")),
+  heroImageLightUrl: z.string().url().optional().or(z.literal("")),
+  heroImageDarkUrl: z.string().url().optional().or(z.literal("")),
   heroHeadline: z.string().max(120).optional().or(z.literal("")),
   description: z.string().max(600).optional().or(z.literal("")),
 
@@ -183,7 +184,7 @@ const publicPageSchema = z.object({
 });
 
 const publicPageSelect =
-  "logo coverImageUrl heroHeadline description category instagramUrl twitterUrl facebookUrl tiktokUrl websiteUrl whatsappNumber bannerText bannerEnabled showPopularItems pickupEnabled deliveryEnabled estimatedPrepTime";
+  "logo heroImageLightUrl heroImageDarkUrl heroHeadline description category instagramUrl twitterUrl facebookUrl tiktokUrl websiteUrl whatsappNumber bannerText bannerEnabled showPopularItems pickupEnabled deliveryEnabled estimatedPrepTime";
 
 function normalizeAiAgent(aiAgent?: { enabled?: boolean; instructions?: string } | null) {
   return {
@@ -195,7 +196,8 @@ function normalizeAiAgent(aiAgent?: { enabled?: boolean; instructions?: string }
 function normalizePublicPage(input: z.infer<typeof publicPageSchema>) {
   return {
     logo: input.logoUrl?.trim() || undefined,
-    coverImageUrl: input.coverImageUrl?.trim() || undefined,
+    heroImageLightUrl: input.heroImageLightUrl?.trim() || undefined,
+    heroImageDarkUrl: input.heroImageDarkUrl?.trim() || undefined,
     heroHeadline: input.heroHeadline?.trim() || "",
     description: input.description?.trim() || "",
     category: input.category?.trim() || "",
@@ -247,7 +249,8 @@ tenantRouter.get("/current/public-page", requireTenant, async (req, res) => {
   res.json({
     data: {
       logoUrl: tenant?.logo ?? "",
-      coverImageUrl: tenant?.coverImageUrl ?? "",
+      heroImageLightUrl: (tenant as Record<string, unknown>)?.heroImageLightUrl as string ?? "",
+      heroImageDarkUrl: (tenant as Record<string, unknown>)?.heroImageDarkUrl as string ?? "",
       heroHeadline: (tenant as Record<string, unknown>)?.heroHeadline as string ?? "",
       description: tenant?.description ?? "",
       category: tenant?.category ?? "",
@@ -290,7 +293,8 @@ tenantRouter.get("/current/storefront", requireTenant, async (req, res) => {
   res.json({
     data: {
       logoUrl: tenant?.logo ?? "",
-      coverImageUrl: tenant?.coverImageUrl ?? "",
+      heroImageLightUrl: (tenant as Record<string, unknown>)?.heroImageLightUrl as string ?? "",
+      heroImageDarkUrl: (tenant as Record<string, unknown>)?.heroImageDarkUrl as string ?? "",
       heroHeadline: (tenant as Record<string, unknown>)?.heroHeadline as string ?? "",
       description: tenant?.description ?? "",
       category: tenant?.category ?? "",

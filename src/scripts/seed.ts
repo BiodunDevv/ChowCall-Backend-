@@ -56,6 +56,8 @@ async function seed() {
     bannerText: "🎉 Free delivery on orders above ₦10,000 today!",
     whatsappNumber: "+2348000000000",
     instagramUrl: "https://instagram.com/mamaskitchen",
+    heroImageLightUrl: "https://images.unsplash.com/photo-1504674900247-0877df9cc836?w=1200&auto=format&fit=crop&q=80",
+    heroImageDarkUrl: "https://images.unsplash.com/photo-1555939594-58d7cb561ad1?w=1200&auto=format&fit=crop&q=80",
     showPopularItems: true,
     pickupEnabled: true,
     deliveryEnabled: true,
