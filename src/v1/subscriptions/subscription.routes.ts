@@ -74,6 +74,15 @@ subscriptionRouter.post("/verify", async (req, res) => {
 
 // GET /v1/subscriptions/status — get current subscription status
 subscriptionRouter.get("/status", async (req, res) => {
-  const tenant = await Tenant.findById(req.user!.tenantId).select("subscriptionStatus subscribedPlan subscriptionExpiresAt");
-  res.json({ data: tenant });
+  const tenant = await Tenant.findById(req.user!.tenantId)
+    .select("subscriptionStatus subscribedPlan billingPlan subscriptionExpiresAt")
+    .lean();
+  res.json({
+    data: {
+      subscriptionStatus: tenant?.subscriptionStatus ?? "unpaid",
+      // subscribedPlan is set after a real payment; fall back to billingPlan from seed/onboarding
+      subscribedPlan: tenant?.subscribedPlan ?? tenant?.billingPlan ?? null,
+      subscriptionExpiresAt: tenant?.subscriptionExpiresAt ?? null,
+    },
+  });
 });

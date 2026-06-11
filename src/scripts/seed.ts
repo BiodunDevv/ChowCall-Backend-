@@ -46,12 +46,29 @@ async function seed() {
     },
     serviceFee: { enabled: true, mode: "percentage", percentage: 5 },
     billingPlan: "growth",
+    // Storefront / public page
+    logo: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=200&auto=format&fit=crop&q=80",
+    coverImageUrl: "https://plus.unsplash.com/premium_photo-1661883237884-263e8de8869b?w=800&auto=format&fit=crop&q=60&ixlib=rb-4.1.0&ixid=M3wxMjA3fDB8MHxzZWFyY2h8N3x8aGVybyUyMGJhY2tncm91bmQlMjBmb3IlMjByZXN0YXVyYW50fGVufDB8fDB8fHww",
+    heroHeadline: "Order from Mama's Kitchen — fresh, fast & flavourful.",
     description: "Authentic Nigerian home cooking — Jollof Rice, Egusi Soup, Suya and more, delivered fresh.",
     category: "Nigerian Cuisine",
+    bannerEnabled: true,
+    bannerText: "🎉 Free delivery on orders above ₦10,000 today!",
+    whatsappNumber: "+2348000000000",
+    instagramUrl: "https://instagram.com/mamaskitchen",
     showPopularItems: true,
     pickupEnabled: true,
     deliveryEnabled: true,
     estimatedPrepTime: 25,
+    openingHours: {
+      monday:    { open: true,  from: "09:00", to: "22:00" },
+      tuesday:   { open: true,  from: "09:00", to: "22:00" },
+      wednesday: { open: true,  from: "09:00", to: "22:00" },
+      thursday:  { open: true,  from: "09:00", to: "22:00" },
+      friday:    { open: true,  from: "09:00", to: "23:00" },
+      saturday:  { open: true,  from: "10:00", to: "23:00" },
+      sunday:    { open: true,  from: "11:00", to: "20:00" },
+    },
   });
   console.log(`Created demo tenant: ${demoTenant.name} (slug: ${demoTenant.slug})`);
 

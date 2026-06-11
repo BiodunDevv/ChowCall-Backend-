@@ -60,7 +60,10 @@ const hoursSchema = z.object({
 
 tenantRouter.get("/current/hours", requireTenant, async (req, res) => {
   const tenant = await Tenant.findById(req.user!.tenantId).select("openingHours").lean();
-  res.json({ data: tenant?.openingHours ?? {} });
+  const hours = tenant?.openingHours;
+  // Return null/empty object as null so frontend knows no schedule is set
+  const hasSchedule = hours && typeof hours === "object" && Object.keys(hours).length > 0;
+  res.json({ data: hasSchedule ? hours : null });
 });
 
 tenantRouter.patch(
@@ -159,10 +162,17 @@ const aiAgentSchema = z.object({
 });
 
 const publicPageSchema = z.object({
+  logoUrl: z.string().url().optional().or(z.literal("")),
   coverImageUrl: z.string().url().optional().or(z.literal("")),
+  heroHeadline: z.string().max(120).optional().or(z.literal("")),
   description: z.string().max(600).optional().or(z.literal("")),
+
   category: z.string().max(80).optional().or(z.literal("")),
   instagramUrl: z.string().url().optional().or(z.literal("")),
+  twitterUrl: z.string().url().optional().or(z.literal("")),
+  facebookUrl: z.string().url().optional().or(z.literal("")),
+  tiktokUrl: z.string().url().optional().or(z.literal("")),
+  websiteUrl: z.string().url().optional().or(z.literal("")),
   whatsappNumber: z.string().max(32).optional().or(z.literal("")),
   bannerText: z.string().max(140).optional().or(z.literal("")),
   bannerEnabled: z.boolean().optional(),
@@ -173,7 +183,7 @@ const publicPageSchema = z.object({
 });
 
 const publicPageSelect =
-  "coverImageUrl description category instagramUrl whatsappNumber bannerText bannerEnabled showPopularItems pickupEnabled deliveryEnabled estimatedPrepTime";
+  "logo coverImageUrl heroHeadline description category instagramUrl twitterUrl facebookUrl tiktokUrl websiteUrl whatsappNumber bannerText bannerEnabled showPopularItems pickupEnabled deliveryEnabled estimatedPrepTime";
 
 function normalizeAiAgent(aiAgent?: { enabled?: boolean; instructions?: string } | null) {
   return {
@@ -184,10 +194,16 @@ function normalizeAiAgent(aiAgent?: { enabled?: boolean; instructions?: string }
 
 function normalizePublicPage(input: z.infer<typeof publicPageSchema>) {
   return {
+    logo: input.logoUrl?.trim() || undefined,
     coverImageUrl: input.coverImageUrl?.trim() || undefined,
+    heroHeadline: input.heroHeadline?.trim() || "",
     description: input.description?.trim() || "",
     category: input.category?.trim() || "",
     instagramUrl: input.instagramUrl?.trim() || "",
+    twitterUrl: input.twitterUrl?.trim() || "",
+    facebookUrl: input.facebookUrl?.trim() || "",
+    tiktokUrl: input.tiktokUrl?.trim() || "",
+    websiteUrl: input.websiteUrl?.trim() || "",
     whatsappNumber: input.whatsappNumber?.trim() || "",
     bannerText: input.bannerText?.trim() || "",
     bannerEnabled: input.bannerEnabled ?? false,
@@ -230,10 +246,16 @@ tenantRouter.get("/current/public-page", requireTenant, async (req, res) => {
   const tenant = await Tenant.findById(req.user!.tenantId).select(publicPageSelect).lean();
   res.json({
     data: {
+      logoUrl: tenant?.logo ?? "",
       coverImageUrl: tenant?.coverImageUrl ?? "",
+      heroHeadline: (tenant as Record<string, unknown>)?.heroHeadline as string ?? "",
       description: tenant?.description ?? "",
       category: tenant?.category ?? "",
       instagramUrl: tenant?.instagramUrl ?? "",
+      twitterUrl: (tenant as Record<string, unknown>)?.twitterUrl as string ?? "",
+      facebookUrl: (tenant as Record<string, unknown>)?.facebookUrl as string ?? "",
+      tiktokUrl: (tenant as Record<string, unknown>)?.tiktokUrl as string ?? "",
+      websiteUrl: (tenant as Record<string, unknown>)?.websiteUrl as string ?? "",
       whatsappNumber: tenant?.whatsappNumber ?? "",
       bannerText: tenant?.bannerText ?? "",
       bannerEnabled: tenant?.bannerEnabled ?? false,
@@ -267,10 +289,16 @@ tenantRouter.get("/current/storefront", requireTenant, async (req, res) => {
   const tenant = await Tenant.findById(req.user!.tenantId).select(publicPageSelect).lean();
   res.json({
     data: {
+      logoUrl: tenant?.logo ?? "",
       coverImageUrl: tenant?.coverImageUrl ?? "",
+      heroHeadline: (tenant as Record<string, unknown>)?.heroHeadline as string ?? "",
       description: tenant?.description ?? "",
       category: tenant?.category ?? "",
       instagramUrl: tenant?.instagramUrl ?? "",
+      twitterUrl: (tenant as Record<string, unknown>)?.twitterUrl as string ?? "",
+      facebookUrl: (tenant as Record<string, unknown>)?.facebookUrl as string ?? "",
+      tiktokUrl: (tenant as Record<string, unknown>)?.tiktokUrl as string ?? "",
+      websiteUrl: (tenant as Record<string, unknown>)?.websiteUrl as string ?? "",
       whatsappNumber: tenant?.whatsappNumber ?? "",
       bannerText: tenant?.bannerText ?? "",
       bannerEnabled: tenant?.bannerEnabled ?? false,

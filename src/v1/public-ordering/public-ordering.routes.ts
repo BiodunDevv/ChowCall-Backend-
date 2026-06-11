@@ -26,9 +26,14 @@ function publicTenantPayload(tenant: {
   aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
   onboarding?: { status?: string | null } | null;
   coverImageUrl?: string | null;
+  heroHeadline?: string | null;
   description?: string | null;
   category?: string | null;
   instagramUrl?: string | null;
+  twitterUrl?: string | null;
+  facebookUrl?: string | null;
+  tiktokUrl?: string | null;
+  websiteUrl?: string | null;
   whatsappNumber?: string | null;
   bannerText?: string | null;
   bannerEnabled?: boolean | null;
@@ -55,9 +60,14 @@ function publicTenantPayload(tenant: {
     subscriptionStatus: tenant.subscriptionStatus,
     active: tenant.subscriptionStatus === "active" || tenant.onboarding?.status === "live",
     coverImageUrl: tenant.coverImageUrl ?? null,
+    heroHeadline: tenant.heroHeadline ?? null,
     description: tenant.description ?? null,
     category: tenant.category ?? null,
     instagramUrl: tenant.instagramUrl ?? null,
+    twitterUrl: tenant.twitterUrl ?? null,
+    facebookUrl: tenant.facebookUrl ?? null,
+    tiktokUrl: tenant.tiktokUrl ?? null,
+    websiteUrl: tenant.websiteUrl ?? null,
     whatsappNumber: tenant.whatsappNumber ?? null,
     bannerText: tenant.bannerText ?? null,
     bannerEnabled: tenant.bannerEnabled ?? false,
