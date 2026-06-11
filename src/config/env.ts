@@ -1,0 +1,68 @@
+import "dotenv/config";
+import { z } from "zod";
+
+const envSchema = z.object({
+  NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
+  PORT: z.coerce.number().int().positive().default(4000),
+  API_BASE_URL: z.string().url().default("http://localhost:4000"),
+  APP_NAME: z.string().default("ChowCall API"),
+  CORS_ORIGINS: z.string().default("http://localhost:3000"),
+  CORS_CREDENTIALS: z.coerce.boolean().default(true),
+  CORS_METHODS: z.string().default("GET,POST,PUT,PATCH,DELETE,OPTIONS"),
+  MONGODB_URI: z.string().min(1),
+  MONGODB_DB_NAME: z.string().default("chowcall"),
+  REDIS_URL: z.string().default("redis://127.0.0.1:6379"),
+  REDIS_PREFIX: z.string().default("chowcall"),
+  JWT_ACCESS_SECRET: z.string().min(12),
+  JWT_REFRESH_SECRET: z.string().min(12),
+  JWT_ACCESS_TTL: z.string().default("15m"),
+  JWT_REFRESH_TTL: z.string().default("30d"),
+  SWAGGER_ENABLED: z.coerce.boolean().default(true),
+  SWAGGER_PATH: z.string().default("/docs"),
+  PAYSTACK_SECRET_KEY: z.string().optional().default(""),
+  PAYSTACK_PUBLIC_KEY: z.string().optional().default(""),
+  PAYSTACK_WEBHOOK_SECRET: z.string().optional().default(""),
+  FLUTTERWAVE_SECRET_KEY: z.string().optional().default(""),
+  FLUTTERWAVE_PUBLIC_KEY: z.string().optional().default(""),
+  FLUTTERWAVE_WEBHOOK_SECRET: z.string().optional().default(""),
+  MAPS_PROVIDER: z.enum(["mapbox"]).default("mapbox"),
+  MAPBOX_ACCESS_TOKEN: z.string().min(1),
+  OPENAI_API_KEY: z.string().optional().default(""),
+  AZURE_OPENAI_ENDPOINT: z.string().url().optional().default("https://example.openai.azure.com/"),
+  AZURE_OPENAI_API_KEY: z.string().optional().default(""),
+  AZURE_OPENAI_DEPLOYMENT_NAME: z.string().optional().default(""),
+  AZURE_OPENAI_MODEL_NAME: z.string().optional().default(""),
+  AZURE_OPENAI_API_VERSION: z.string().optional().default("2024-04-01-preview"),
+  AZURE_SPEECH_KEY: z.string().optional().default(""),
+  AZURE_SPEECH_REGION: z.string().optional().default(""),
+  BREVO_API_KEY: z.string().optional().default(""),
+  TWILIO_ACCOUNT_SID: z.string().optional().default(""),
+  TWILIO_AUTH_TOKEN: z.string().optional().default(""),
+  TWILIO_FROM_NUMBER: z.string().optional().default(""),
+  WHATSAPP_PROVIDER: z.enum(["disabled", "brevo"]).default("disabled"),
+  SMS_PROVIDER: z.enum(["twilio"]).default("twilio"),
+  EMAIL_PROVIDER: z.enum(["brevo"]).default("brevo"),
+  EMAIL_FROM: z.string().default("ChowCall <hello@chowcall.ng>"),
+  EMAIL_REPLY_TO: z.string().optional().default(""),
+  BRAND_LOGO_URL: z.string().url().default("https://chowcall.ng/chowcall-logo.svg"),
+  FRONTEND_BASE_URL: z.string().url().default("http://localhost:3000"),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60000),
+  RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+  ENCRYPTION_KEY: z.string().min(12),
+  QUEUE_CONCURRENCY: z.coerce.number().int().positive().default(5),
+  PAYMENT_EXPIRY_MINUTES: z.coerce.number().int().positive().default(15),
+});
+
+const parsed = envSchema.safeParse(process.env);
+
+if (!parsed.success) {
+  console.error("Invalid ChowCall backend environment");
+  console.error(parsed.error.flatten().fieldErrors);
+  process.exit(1);
+}
+
+export const env = {
+  ...parsed.data,
+  CORS_ORIGINS_LIST: parsed.data.CORS_ORIGINS.split(",").map((origin) => origin.trim()),
+  CORS_METHODS_LIST: parsed.data.CORS_METHODS.split(",").map((method) => method.trim()),
+};
