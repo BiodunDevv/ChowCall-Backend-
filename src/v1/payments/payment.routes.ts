@@ -202,6 +202,58 @@ paymentRouter.post("/webhooks/flutterwave", async (req, res) => {
   res.json({ received: true });
 });
 
+/**
+ * GET /v1/payments/webhooks/paystack
+ * Paystack redirects the customer's browser here after payment with
+ * ?trxref=...&reference=... — we bounce them to the frontend billing/plan
+ * page which then calls /v1/subscriptions/verify to confirm the payment.
+ */
+paymentRouter.get("/webhooks/paystack", async (req, res) => {
+  const reference = (req.query.reference ?? req.query.trxref ?? "") as string;
+  const frontendBase = env.FRONTEND_BASE_URL ?? "https://chowcall.live";
+
+  if (!reference) {
+    res.redirect(`${frontendBase}`);
+    return;
+  }
+
+  // Try to find the tenant's slug from the pending sub reference so we
+  // can redirect to the right workspace's billing/plan page.
+  const { Tenant } = await import("../tenants/tenant.model.js");
+  const tenant = await Tenant.findOne({ "onboarding.pendingSubReference": reference }).select("slug").lean();
+
+  if (tenant?.slug) {
+    res.redirect(`${frontendBase}/${tenant.slug}/billing/plan?reference=${encodeURIComponent(reference)}`);
+  } else {
+    // Fallback — the billing/plan page will verify and redirect to dashboard
+    res.redirect(`${frontendBase}/billing/plan?reference=${encodeURIComponent(reference)}`);
+  }
+});
+
+/**
+ * GET /v1/payments/webhooks/flutterwave
+ * Flutterwave redirects the customer here with ?tx_ref=...&status=...
+ */
+paymentRouter.get("/webhooks/flutterwave", async (req, res) => {
+  const txRef = (req.query.tx_ref ?? "") as string;
+  const status = (req.query.status ?? "") as string;
+  const frontendBase = env.FRONTEND_BASE_URL ?? "https://chowcall.live";
+
+  if (!txRef) {
+    res.redirect(`${frontendBase}`);
+    return;
+  }
+
+  const { Tenant } = await import("../tenants/tenant.model.js");
+  const tenant = await Tenant.findOne({ "onboarding.pendingSubReference": txRef }).select("slug").lean();
+
+  const base = tenant?.slug
+    ? `${frontendBase}/${tenant.slug}/billing/plan`
+    : `${frontendBase}/billing/plan`;
+
+  res.redirect(`${base}?tx_ref=${encodeURIComponent(txRef)}&status=${encodeURIComponent(status)}`);
+});
+
 // GET /v1/payments/balance — tenant balance summary
 paymentRouter.get("/balance", requireAuth, requireTenant, async (req, res) => {
   const tenantId = req.user!.tenantId!;
