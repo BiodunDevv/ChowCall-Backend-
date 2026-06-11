@@ -2,7 +2,7 @@ import { env } from "../../../config/env.js";
 
 export const emailTheme = {
   appName: "ChowCall",
-  logoUrl: env.BRAND_LOGO_URL ?? "https://chowcall.vercel.app/chowcall-logo.png",
+  logoUrl: env.BRAND_LOGO_URL ?? "https://www.chowcall.live/chowcall-logo.png",
   background: "#f7f1e8",
   card: "#fffaf2",
   text: "#221817",
