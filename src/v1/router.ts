@@ -22,6 +22,7 @@ import { publicOrderingRouter } from "./public-ordering/public-ordering.routes.j
 import { onboardingRouter } from "./onboarding/onboarding.routes.js";
 import { planRouter } from "./plans/plan.routes.js";
 import { subscriptionRouter } from "./subscriptions/subscription.routes.js";
+import { adminRouter } from "./admin/admin.routes.js";
 
 export const v1Router = Router();
 
@@ -48,3 +49,5 @@ v1Router.use("/public-ordering", publicOrderingRouter);
 v1Router.use("/onboarding", onboardingRouter);
 v1Router.use("/plans", planRouter);
 v1Router.use("/subscriptions", subscriptionRouter);
+
+v1Router.use("/admin", adminRouter);

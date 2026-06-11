@@ -192,6 +192,47 @@ export const logout: RequestHandler = async (req, res) => {
   res.status(204).send();
 };
 
+export const updateProfile: RequestHandler = async (req, res, next) => {
+  try {
+    const { name } = req.body as { name?: string };
+    if (!name?.trim()) throw new AppError(400, "Name is required", "NAME_REQUIRED");
+    const user = await User.findByIdAndUpdate(
+      req.user!.id,
+      { name: name.trim() },
+      { new: true }
+    ).select("-passwordHash -refreshTokenHash");
+    const tenant = req.user?.tenantId ? await Tenant.findById(req.user.tenantId) : null;
+    res.json({ user: user ? toAuthUser(user, req.user?.roles ?? [], tenant) : null });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const changePassword: RequestHandler = async (req, res, next) => {
+  try {
+    const { currentPassword, newPassword } = req.body as {
+      currentPassword?: string;
+      newPassword?: string;
+    };
+    if (!currentPassword || !newPassword) {
+      throw new AppError(400, "Current and new password are required", "MISSING_FIELDS");
+    }
+    if (newPassword.length < 8) {
+      throw new AppError(400, "Password must be at least 8 characters", "PASSWORD_TOO_SHORT");
+    }
+    const user = await User.findById(req.user!.id);
+    if (!user) throw new AppError(404, "User not found", "USER_NOT_FOUND");
+    const valid = await comparePassword(currentPassword, user.passwordHash);
+    if (!valid) throw new AppError(401, "Current password is incorrect", "INVALID_PASSWORD");
+
+    user.passwordHash = await hashPassword(newPassword);
+    await user.save();
+    res.json({ message: "Password updated successfully." });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const updateSecuritySettings: RequestHandler = async (req, res, next) => {
   try {
     const input = securitySettingsSchema.parse(req.body);

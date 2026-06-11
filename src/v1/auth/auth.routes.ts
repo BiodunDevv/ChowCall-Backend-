@@ -1,5 +1,6 @@
 import { Router } from "express";
 import {
+  changePassword,
   forgotPassword,
   login,
   logout,
@@ -7,6 +8,7 @@ import {
   refresh,
   register,
   resetPassword,
+  updateProfile,
   updateSecuritySettings,
   verifyOtp,
 } from "./auth.controller.js";
@@ -20,6 +22,8 @@ authRouter.post("/verify-otp", verifyOtp);
 authRouter.post("/refresh", refresh);
 authRouter.post("/logout", requireAuth, logout);
 authRouter.get("/me", requireAuth, me);
+authRouter.patch("/me", requireAuth, updateProfile);
+authRouter.post("/change-password", requireAuth, changePassword);
 authRouter.patch("/security", requireAuth, updateSecuritySettings);
 authRouter.post("/forgot-password", forgotPassword);
 authRouter.post("/reset-password", resetPassword);

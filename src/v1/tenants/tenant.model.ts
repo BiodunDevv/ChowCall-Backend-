@@ -72,6 +72,10 @@ const tenantSchema = new Schema(
     },
     deliveryPricing: { type: deliveryPricingSchema, default: {} },
     serviceFee: { type: serviceFeeSchema, default: {} },
+    aiAgent: {
+      enabled: { type: Boolean, default: false },
+      instructions: { type: String, default: "" },
+    },
     billingPlan: { type: String, enum: ["starter", "growth", "pro", "enterprise"], default: "starter" },
     logo: { type: String },
     subscriptionStatus: { type: String, enum: ["trial", "active", "unpaid", "cancelled"], default: "unpaid" },

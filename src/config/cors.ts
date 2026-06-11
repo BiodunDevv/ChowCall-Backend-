@@ -9,14 +9,17 @@ function isAllowedOrigin(origin: string): boolean {
     const url = new URL(origin);
     const hostname = url.hostname;
 
-    // Allow any subdomain of localhost (e.g. tenant.localhost)
-    if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
+    // Allow localhost (all tenant paths are now served from same origin)
+    if (hostname === "localhost") return true;
 
-    // Allow any subdomain of 172.20.10.4 for local network / mobile testing
-    if (hostname === "172.20.10.4" || hostname.endsWith(".172.20.10.4")) return true;
+    // Allow direct LAN access for mobile / device testing
+    if (hostname === "172.20.10.4") return true;
 
-    // Allow any subdomain of chowcall.ng in production
-    if (hostname === "chowcall.ng" || hostname.endsWith(".chowcall.ng")) return true;
+    // Allow chowcall.live in production (single domain, path-based routing)
+    if (hostname === "chowcall.live" || hostname === "www.chowcall.live") return true;
+
+    // Allow Vercel preview deployments
+    if (hostname.endsWith(".vercel.app")) return true;
   } catch {
     // Malformed origin — deny
   }

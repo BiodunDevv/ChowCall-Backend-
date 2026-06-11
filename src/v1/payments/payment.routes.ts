@@ -133,6 +133,7 @@ paymentRouter.post("/webhooks/paystack", async (req, res) => {
   const eventId = event?.data?.id?.toString() ?? reference;
 
   if (event?.event === "charge.success" && reference) {
+    // Order payment
     const payment = await Payment.findOne({ reference });
     if (payment && !payment.rawWebhookEventIds.includes(eventId)) {
       payment.status = "paid";
@@ -143,6 +144,58 @@ paymentRouter.post("/webhooks/paystack", async (req, res) => {
         status: "CONFIRMED",
         "payment.paidAt": payment.paidAt,
       });
+    }
+
+    // Subscription payment — auto-activate if reference matches pending sub
+    const { Tenant } = await import("../tenants/tenant.model.js");
+    const tenant = await Tenant.findOne({ "onboarding.pendingSubReference": reference });
+    if (tenant && tenant.subscriptionStatus !== "active") {
+      tenant.subscriptionStatus = "active";
+      tenant.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await tenant.save();
+    }
+  }
+
+  res.json({ received: true });
+});
+
+// POST /v1/payments/webhooks/flutterwave
+paymentRouter.post("/webhooks/flutterwave", async (req, res) => {
+  const signature = req.header("verif-hash") ?? "";
+  if (env.FLUTTERWAVE_WEBHOOK_SECRET) {
+    if (signature !== env.FLUTTERWAVE_WEBHOOK_SECRET) {
+      res.status(401).json({ error: { code: "INVALID_WEBHOOK_SIGNATURE" } });
+      return;
+    }
+  }
+
+  const rawBody = Buffer.isBuffer(req.body) ? req.body : Buffer.from(JSON.stringify(req.body));
+  const event = JSON.parse(rawBody.toString("utf8"));
+  const txRef: string | undefined = event?.data?.tx_ref;
+  const eventId: string = String(event?.data?.id ?? txRef ?? "");
+  const status: string = event?.data?.status ?? "";
+
+  if (status === "successful" && txRef) {
+    // Order payment
+    const payment = await Payment.findOne({ reference: txRef });
+    if (payment && !payment.rawWebhookEventIds.includes(eventId)) {
+      payment.status = "paid";
+      payment.paidAt = new Date();
+      payment.rawWebhookEventIds.push(eventId);
+      await payment.save();
+      await Order.findByIdAndUpdate(payment.orderId, {
+        status: "CONFIRMED",
+        "payment.paidAt": payment.paidAt,
+      });
+    }
+
+    // Subscription payment — handled in subscription.routes but we sync here too
+    const { Tenant } = await import("../tenants/tenant.model.js");
+    const tenant = await Tenant.findOne({ "onboarding.pendingSubReference": txRef });
+    if (tenant && tenant.subscriptionStatus !== "active") {
+      tenant.subscriptionStatus = "active";
+      tenant.subscriptionExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await tenant.save();
     }
   }
 
