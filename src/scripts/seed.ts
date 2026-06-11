@@ -52,7 +52,7 @@ async function seed() {
   // Super admin
   const superAdmin = await User.create({
     name: "ChowCall Super Admin",
-    email: "admin@gmail.com",
+    email: "louisdiaz43@gmail.com",
     passwordHash,
     platformRoles: ["platform_owner"],
     memberships: [],
@@ -129,7 +129,7 @@ async function seed() {
 
   console.log("\n=== Seed complete ===");
   console.log("Tenants: demo (active), tenant (unpaid)");
-  console.log("Users: admin@gmail.com, muhammedabiodun42@gmail.com, demo@gmail.com (all password: 123456)");
+  console.log("Users: louisdiaz43@gmail.com, muhammedabiodun42@gmail.com, demo@gmail.com (all password: 123456)");
   console.log("Menu items:", menuItems.length, "(demo tenant)");
 
   await mongoose.disconnect();
