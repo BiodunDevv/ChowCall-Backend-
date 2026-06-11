@@ -403,7 +403,14 @@ async function uniqueTenantSlug(name: string) {
 function toAuthUser(
   user: { id?: string; _id?: unknown; name: string; email: string; twoFaEnabled?: boolean },
   roles: Role[],
-  tenant: { id?: string; _id?: unknown; name: string; slug: string } | null
+  tenant: {
+    id?: string;
+    _id?: unknown;
+    name: string;
+    slug: string;
+    onboarding?: { status?: string | null } | null;
+    subscriptionStatus?: string | null;
+  } | null
 ) {
   return {
     id: user.id ?? String(user._id ?? ""),
@@ -418,6 +425,8 @@ function toAuthUser(
           name: tenant.name,
           slug: tenant.slug,
           logoUrl: (tenant as unknown as Record<string, unknown>).logo ?? null,
+          onboardingStatus: tenant.onboarding?.status ?? null,
+          subscriptionStatus: tenant.subscriptionStatus ?? null,
         }
       : null,
     tenantSlug: tenant?.slug ?? null,
