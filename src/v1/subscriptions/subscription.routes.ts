@@ -47,8 +47,12 @@ subscriptionRouter.post("/checkout", async (req, res) => {
 
 // POST /v1/subscriptions/verify — verify subscription payment
 subscriptionRouter.post("/verify", async (req, res) => {
-  const { reference } = req.body as { reference: string };
-  const provider = getPaymentProvider("paystack");
+  const { reference, provider: providerName } = req.body as { reference: string; provider?: "paystack" | "flutterwave" };
+
+  // Auto-detect provider: Flutterwave tx_ref refs contain "FLW" or caller can pass provider explicitly
+  const resolvedProvider = providerName ?? (reference.toUpperCase().includes("FLW") ? "flutterwave" : "paystack");
+  const provider = getPaymentProvider(resolvedProvider);
+
   const result = await provider.verify(reference);
   if (result.paid) {
     const tenant = await Tenant.findByIdAndUpdate(
@@ -58,6 +62,7 @@ subscriptionRouter.post("/verify", async (req, res) => {
           subscriptionStatus: "active",
           subscriptionExpiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
         },
+        $unset: { "onboarding.pendingSubReference": "" },
       },
       { new: true }
     );
