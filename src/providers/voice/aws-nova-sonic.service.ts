@@ -100,8 +100,12 @@ export class AwsNovaSonicBridge {
   private queue = new AsyncEventQueue();
   private stopped = false;
   private failed = false;
+  private audioInputStarted = false;
+  private greetingCompleted = false;
+  private assistantTurnActive = false;
   private readonly promptName = `prompt_${randomUUID().replaceAll("-", "")}`;
   private readonly systemContentName = `system_${randomUUID().replaceAll("-", "")}`;
+  private readonly greetingContentName = `greeting_${randomUUID().replaceAll("-", "")}`;
   private readonly audioContentName = `audio_${randomUUID().replaceAll("-", "")}`;
 
   constructor(private readonly config: AwsNovaSonicBridgeConfig) {}
@@ -110,31 +114,6 @@ export class AwsNovaSonicBridge {
     awsNovaSonicService.assertConfigured();
     this.stopped = false;
     this.failed = false;
-
-    this.emit({
-      type: "session_started",
-      session_id: this.config.sessionId,
-      config: {
-        provider: "aws_nova_sonic",
-        modelId: this.config.voiceSettings.modelId,
-        voiceId: this.config.voiceSettings.voiceId,
-        language: this.config.voiceSettings.language,
-      },
-    });
-    this.emit({
-      type: "session.ready",
-      sessionId: this.config.sessionId,
-      agentName: "Amazon Nova Sonic",
-      agentVersion: this.config.voiceSettings.modelId,
-    });
-    this.emit({ type: "caption.assistant", text: this.config.greeting });
-    this.emit({
-      type: "transcript",
-      role: "assistant",
-      text: this.config.greeting,
-      isFinal: true,
-    });
-    this.emit({ type: "status", state: "listening" });
 
     this.queue.push(this.eventInput("sessionStart", {
       inferenceConfiguration: {
@@ -175,25 +154,26 @@ export class AwsNovaSonicBridge {
     }));
     this.queue.push(this.eventInput("contentStart", {
       promptName: this.promptName,
-      contentName: this.audioContentName,
-      type: "AUDIO",
+      contentName: this.greetingContentName,
+      type: "TEXT",
       interactive: true,
       role: "USER",
-      audioInputConfiguration: {
-        audioType: "SPEECH",
-        encoding: "base64",
-        mediaType: "audio/lpcm",
-        sampleRateHertz: 16000,
-        sampleSizeBits: 16,
-        channelCount: 1,
-      },
+      textInputConfiguration: { mediaType: "text/plain" },
     }));
-
+    this.queue.push(this.eventInput("textInput", {
+      promptName: this.promptName,
+      contentName: this.greetingContentName,
+      content: `Begin this voice ordering session now. Say exactly: "${this.config.greeting}"`,
+    }));
+    this.queue.push(this.eventInput("contentEnd", {
+      promptName: this.promptName,
+      contentName: this.greetingContentName,
+    }));
     void this.runBedrockStream();
   }
 
   async sendAudio(audioBase64?: string) {
-    if (!audioBase64 || this.stopped || this.failed) return;
+    if (!audioBase64 || !this.audioInputStarted || this.stopped || this.failed) return;
     this.queue.push(this.eventInput("audioInput", {
       promptName: this.promptName,
       contentName: this.audioContentName,
@@ -203,10 +183,12 @@ export class AwsNovaSonicBridge {
 
   async stop() {
     this.stopped = true;
-    this.queue.push(this.eventInput("contentEnd", {
-      promptName: this.promptName,
-      contentName: this.audioContentName,
-    }));
+    if (this.audioInputStarted) {
+      this.queue.push(this.eventInput("contentEnd", {
+        promptName: this.promptName,
+        contentName: this.audioContentName,
+      }));
+    }
     this.queue.push(this.eventInput("promptEnd", { promptName: this.promptName }));
     this.queue.push(this.eventInput("sessionEnd", {}));
     this.queue.close();
@@ -224,6 +206,33 @@ export class AwsNovaSonicBridge {
           body: this.queue.stream(),
         }),
       );
+
+      // The Bedrock stream is now established. Only now should the browser
+      // begin sending microphone audio or play the restaurant greeting.
+      this.emit({
+        type: "session_started",
+        session_id: this.config.sessionId,
+        config: {
+          provider: "aws_nova_sonic",
+          modelId: this.config.voiceSettings.modelId,
+          voiceId: this.config.voiceSettings.voiceId,
+          language: this.config.voiceSettings.language,
+        },
+      });
+      this.emit({
+        type: "session.ready",
+        sessionId: this.config.sessionId,
+        agentName: "Amazon Nova Sonic",
+        agentVersion: this.config.voiceSettings.modelId,
+      });
+      this.emit({ type: "caption.assistant", text: this.config.greeting });
+      this.emit({ type: "status", state: "thinking" });
+      setTimeout(() => {
+        if (!this.stopped && !this.failed && !this.audioInputStarted) {
+          console.warn(`[NovaSonic:startup] Greeting response timed out for ${this.config.sessionId}; opening microphone input.`);
+          this.startAudioInput();
+        }
+      }, 8_000);
 
       for await (const event of response.body ?? []) {
         if (this.stopped || this.failed) break;
@@ -247,13 +256,6 @@ export class AwsNovaSonicBridge {
         type: "audio_data",
         data: audio,
         format: "pcm16",
-        sampleRate: 24000,
-        channels: 1,
-      });
-      this.emit({
-        type: "assistant.audio",
-        audio,
-        mimeType: "audio/pcm",
         sampleRate: 24000,
         channels: 1,
       });
@@ -341,13 +343,6 @@ export class AwsNovaSonicBridge {
           sampleRate: 24000,
           channels: 1,
         });
-        this.emit({
-          type: "assistant.audio",
-          audio,
-          mimeType: "audio/pcm",
-          sampleRate: 24000,
-          channels: 1,
-        });
       }
       return;
     }
@@ -355,15 +350,24 @@ export class AwsNovaSonicBridge {
     const contentStart = recordValue(event.contentStart);
     if (contentStart) {
       const role = String(contentStart.role ?? "").toLowerCase();
-      if (role === "assistant") this.emit({ type: "status", state: "speaking" });
+      if (role === "assistant") {
+        this.assistantTurnActive = true;
+        this.emit({ type: "status", state: "speaking" });
+      }
       if (role === "user") this.emit({ type: "status", state: "listening" });
       return;
     }
 
     const contentEnd = recordValue(event.contentEnd);
     if (contentEnd) {
-      const role = String(contentEnd.role ?? "").toLowerCase();
-      if (role === "assistant") this.emit({ type: "status", state: "listening" });
+      if (!this.assistantTurnActive) return;
+      this.assistantTurnActive = false;
+      if (!this.greetingCompleted) {
+        this.greetingCompleted = true;
+        this.startAudioInput();
+      } else if (this.audioInputStarted) {
+        this.emit({ type: "status", state: "listening" });
+      }
       return;
     }
 
@@ -401,6 +405,27 @@ export class AwsNovaSonicBridge {
         bytes: new TextEncoder().encode(JSON.stringify({ event: { [eventName]: payload } })),
       },
     };
+  }
+
+  private startAudioInput() {
+    if (this.audioInputStarted || this.stopped || this.failed) return;
+    this.audioInputStarted = true;
+    this.queue.push(this.eventInput("contentStart", {
+      promptName: this.promptName,
+      contentName: this.audioContentName,
+      type: "AUDIO",
+      interactive: true,
+      role: "USER",
+      audioInputConfiguration: {
+        audioType: "SPEECH",
+        encoding: "base64",
+        mediaType: "audio/lpcm",
+        sampleRateHertz: 16000,
+        sampleSizeBits: 16,
+        channelCount: 1,
+      },
+    }));
+    this.emit({ type: "status", state: "listening" });
   }
 
   private systemPrompt() {
