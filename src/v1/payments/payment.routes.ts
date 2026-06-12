@@ -32,6 +32,27 @@ import { tenantQuery } from "../../shared/utils/tenant-query.js";
 import { Payment } from "./payment.model.js";
 import { Order } from "../orders/order.model.js";
 import { sendKitchenTicketForOrder } from "../ai-ordering/kitchen-ticket.service.js";
+import { brevoEmailProvider } from "../../providers/email/brevo-email.provider.js";
+import { paymentConfirmedEmail } from "../../providers/email/templates/order.templates.js";
+
+async function sendReceiptEmail(orderId: string) {
+  const order = await Order.findById(orderId).lean();
+  if (!order?.customer?.email) return;
+  const { Tenant } = await import("../tenants/tenant.model.js");
+  const tenant = await Tenant.findById(order.tenantId).lean();
+  if (!tenant) return;
+  await brevoEmailProvider
+    .send({
+      to: order.customer.email,
+      subject: `Receipt for your ${tenant.name} order`,
+      html: paymentConfirmedEmail({
+        tenantName: tenant.name,
+        orderNumber: order.orderNumber ?? String(order._id).slice(-6).toUpperCase(),
+        total: `NGN ${Math.round(order.pricing?.totalPayable ?? 0).toLocaleString("en-NG")}`,
+      }),
+    })
+    .catch(() => undefined);
+}
 
 export const paymentRouter = Router();
 
@@ -108,6 +129,7 @@ paymentRouter.get("/:reference/verify", requireAuth, requireTenant, async (req, 
       "payment.paidAt": payment.paidAt,
     });
     await sendKitchenTicketForOrder(String(payment.orderId));
+    await sendReceiptEmail(String(payment.orderId));
   }
 
   res.json({ data: { paid: result.paid, payment, raw: result.raw } });
@@ -147,6 +169,7 @@ paymentRouter.post("/webhooks/paystack", async (req, res) => {
         "payment.paidAt": payment.paidAt,
       });
       await sendKitchenTicketForOrder(String(payment.orderId));
+      await sendReceiptEmail(String(payment.orderId));
     }
 
     // Subscription payment — auto-activate if reference matches pending sub
@@ -191,6 +214,7 @@ paymentRouter.post("/webhooks/flutterwave", async (req, res) => {
         "payment.paidAt": payment.paidAt,
       });
       await sendKitchenTicketForOrder(String(payment.orderId));
+      await sendReceiptEmail(String(payment.orderId));
     }
 
     // Subscription payment — handled in subscription.routes but we sync here too

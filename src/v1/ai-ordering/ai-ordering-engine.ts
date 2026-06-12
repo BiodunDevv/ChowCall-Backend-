@@ -4,7 +4,8 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { azureOpenAiProvider } from "../../providers/ai/azure-openai.provider.js";
 import { createReference } from "../../shared/utils/reference.js";
 import { mapboxMapsProvider } from "../../providers/maps/mapbox-maps.provider.js";
-import { twilioSmsProvider } from "../../providers/messaging/twilio-sms.provider.js";
+import { brevoEmailProvider } from "../../providers/email/brevo-email.provider.js";
+import { paymentLinkEmail, paymentConfirmedEmail } from "../../providers/email/templates/order.templates.js";
 import { getPaymentProvider } from "../../providers/payments/index.js";
 import { env } from "../../config/env.js";
 import { MenuItem } from "../menu/menu-item.model.js";
@@ -47,6 +48,14 @@ type DraftItem = PriceableOrderItem & {
   name: string;
   quantity: number;
   unitPrice: number;
+};
+
+type ClientDraftItem = {
+  menuItemId?: string;
+  id?: string;
+  name?: string;
+  quantity?: number;
+  notes?: string;
 };
 
 type PricingDraftResult = {
@@ -210,6 +219,36 @@ function resolveAiItems(
   }
 
   return { added, unavailable, ambiguous };
+}
+
+function resolveVisibleCartItems(inputItems: ClientDraftItem[] | undefined, menuItems: MenuDoc[]) {
+  if (!Array.isArray(inputItems) || inputItems.length === 0) return null;
+
+  return inputItems.map((inputItem) => {
+    const requestedId = (inputItem.menuItemId ?? inputItem.id ?? "").trim();
+    const requestedName = (inputItem.name ?? "").trim();
+    const menuItem = requestedId
+      ? menuItems.find((item) => String(item._id) === requestedId)
+      : menuItems.find((item) => normalize(item.name) === normalize(requestedName));
+
+    if (!menuItem) {
+      throw new AppError(
+        422,
+        `${requestedName || "One item"} is no longer on this restaurant menu.`,
+        "ORDER_ITEM_INVALID"
+      );
+    }
+
+    if (!menuItem.available) {
+      throw new AppError(422, `${menuItem.name} is sold out right now.`, "ORDER_ITEM_UNAVAILABLE");
+    }
+
+    const quantity = Math.max(1, Math.min(20, Number(inputItem.quantity ?? 1) || 1));
+    return {
+      ...asDraftItem(menuItem, quantity),
+      ...(inputItem.notes ? { notes: String(inputItem.notes).slice(0, 500) } : {}),
+    };
+  });
 }
 
 function detectFulfilment(message: string) {
@@ -483,38 +522,53 @@ export async function handleOrderingMessage(input: { tenantSlug: string; session
   };
 }
 
-export async function createOrderFromSession(input: { tenantSlug: string; sessionId: string; customer?: Record<string, unknown> }) {
+export async function createOrderFromSession(input: {
+  tenantSlug: string;
+  sessionId: string;
+  customer?: Record<string, unknown>;
+  items?: ClientDraftItem[];
+  fulfilmentType?: "pickup" | "delivery";
+}) {
   const tenant = await resolveTenant(input.tenantSlug);
   const session = await ChatSession.findOne({ _id: input.sessionId, tenantId: tenant._id });
   if (!session) throw new AppError(404, "Order session not found.", "CHAT_SESSION_NOT_FOUND");
 
+  const menuItems = await getMenu(tenant);
+  const visibleCartItems = resolveVisibleCartItems(input.items, menuItems);
+  const draftItems = visibleCartItems ?? (session.items as DraftItem[]);
+  const fulfilmentType = input.fulfilmentType ?? (session.fulfilmentType as "pickup" | "delivery" | undefined);
   const customer = { ...(session.customer ?? {}), ...(input.customer ?? {}) };
   const needs = computeNeeds({
-    items: session.items as DraftItem[],
-    fulfilmentType: session.fulfilmentType as "pickup" | "delivery" | null,
+    items: draftItems,
+    fulfilmentType: fulfilmentType ?? null,
     customer: customer as { name?: string; phone?: string; email?: string; address?: string },
   });
   if (needs.length) throw new AppError(422, "Order is not ready yet.", "ORDER_DRAFT_INCOMPLETE", { needs });
 
   const priced = await priceDraft({
     tenant,
-    items: session.items as DraftItem[],
-    fulfilmentType: session.fulfilmentType as "pickup" | "delivery",
+    items: draftItems,
+    fulfilmentType,
     customer: customer as { address?: string },
   });
   const statusToken = randomBytes(18).toString("hex");
   const statusTokenHash = createHash("sha256").update(statusToken).digest("hex");
   const order = await Order.create({
     tenantId: tenantId(tenant),
-    source: "chat",
+    source: "voice",
     status: "PRICED",
     customer: { ...customer, ...(priced.customerPatch ?? {}) },
-    fulfilmentType: session.fulfilmentType,
+    fulfilmentType,
     items: priced.items,
     pricing: priced.pricing,
     publicStatusTokenHash: statusTokenHash,
   });
 
+  session.items = priced.items as never;
+  session.fulfilmentType = fulfilmentType;
+  session.customer = { ...customer, ...(priced.customerPatch ?? {}) } as never;
+  session.pricing = priced.pricing as never;
+  session.needs = [];
   session.orderId = order._id;
   session.status = "converted";
   await session.save();
@@ -538,7 +592,7 @@ export async function createPublicPaymentLink(input: { tenantSlug: string; order
     email: order.customer?.email ?? undefined,
     phone: order.customer?.phone ?? undefined,
     reference,
-    metadata: { orderId: order.id, tenantId: tenantId(tenant), source: "ai_chat" },
+    metadata: { orderId: order.id, tenantId: tenantId(tenant), source: "voice_ordering" },
   });
 
   const payment =
@@ -561,12 +615,28 @@ export async function createPublicPaymentLink(input: { tenantSlug: string; order
   };
   await order.save();
 
-  if (order.customer?.phone) {
-    await twilioSmsProvider
+  if (order.customer?.email) {
+    const fmt = (v = 0) => `NGN ${Math.round(v).toLocaleString("en-NG")}`;
+    const expiresAt = order.payment?.expiresAt;
+    const expiresIn = expiresAt
+      ? `${Math.max(0, Math.round((expiresAt.getTime() - Date.now()) / 60_000))} minutes`
+      : `${env.PAYMENT_EXPIRY_MINUTES} minutes`;
+    await brevoEmailProvider
       .send({
-        to: order.customer.phone,
-        channel: "sms",
-        body: `Your ${tenant.name} ChowCall payment link: ${link.authorizationUrl}`,
+        to: order.customer.email,
+        subject: `Complete your ${tenant.name} order payment`,
+        html: paymentLinkEmail({
+          customerName: order.customer.name ?? undefined,
+          tenantName: tenant.name,
+          paymentUrl: link.authorizationUrl,
+          expiresIn,
+          money: {
+            subtotal: fmt(order.pricing?.itemSubtotal ?? order.pricing?.totalPayable),
+            deliveryFee: fmt(order.pricing?.deliveryFee ?? 0),
+            serviceFee: fmt(order.pricing?.serviceFee ?? 0),
+            total: fmt(order.pricing?.totalPayable),
+          },
+        }),
       })
       .catch(() => undefined);
   }

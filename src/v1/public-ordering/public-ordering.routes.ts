@@ -19,6 +19,61 @@ import {
 
 export const publicOrderingRouter = Router();
 
+function normalizeMenuName(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+async function resolvePublicOrderItems(
+  tenantId: unknown,
+  inputItems: Array<{
+    menuItemId?: string;
+    id?: string;
+    name?: string;
+    quantity?: number;
+    notes?: string;
+  }> = []
+) {
+  if (!inputItems.length) {
+    throw new AppError(400, "At least one order item is required.", "ORDER_ITEMS_REQUIRED");
+  }
+
+  const menuItems = await MenuItem.find({ tenantId }).lean<
+    Array<{
+      _id: unknown;
+      name: string;
+      basePrice: number;
+      available: boolean;
+    }>
+  >();
+
+  return inputItems.map((inputItem) => {
+    const requestedId = (inputItem.menuItemId ?? inputItem.id ?? "").trim();
+    const requestedName = (inputItem.name ?? "").trim();
+    const menuItem = requestedId
+      ? menuItems.find((item) => String(item._id) === requestedId)
+      : menuItems.find((item) => normalizeMenuName(item.name) === normalizeMenuName(requestedName));
+
+    if (!menuItem) {
+      throw new AppError(
+        422,
+        `${requestedName || "One item"} is no longer on this restaurant menu.`,
+        "ORDER_ITEM_INVALID"
+      );
+    }
+    if (!menuItem.available) {
+      throw new AppError(422, `${menuItem.name} is sold out right now.`, "ORDER_ITEM_UNAVAILABLE");
+    }
+
+    return {
+      menuItemId: String(menuItem._id),
+      name: menuItem.name,
+      quantity: Math.max(1, Math.min(20, Number(inputItem.quantity ?? 1) || 1)),
+      unitPrice: Number(menuItem.basePrice ?? 0),
+      ...(inputItem.notes ? { notes: String(inputItem.notes).slice(0, 500) } : {}),
+    };
+  });
+}
+
 function publicTenantPayload(tenant: {
   id?: string;
   _id?: unknown;
@@ -190,6 +245,8 @@ publicOrderingRouter.post("/:tenantSlug/orders", async (req, res, next) => {
       tenantSlug: req.params.tenantSlug,
       sessionId,
       customer: req.body?.customer,
+      items: req.body?.items,
+      fulfilmentType: req.body?.fulfilmentType,
     });
     res.status(201).json({ data });
   } catch (error) {
@@ -236,13 +293,14 @@ publicOrderingRouter.post("/:tenantSlug/orders/:orderId/payment-link", async (re
 publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
   try {
     const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
+    const items = await resolvePublicOrderItems(tenant._id, req.body.items ?? []);
 
     const priced = priceOrder({
       fulfilmentType: req.body.fulfilmentType ?? "delivery",
       distanceKm: req.body.distanceKm,
       durationMinutes: req.body.durationMinutes,
       discount: req.body.discount ?? 0,
-      items: req.body.items ?? [],
+      items,
       deliveryPricing: tenant.deliveryPricing as unknown as DeliveryPricingConfig,
       serviceFee: tenant.serviceFee as unknown as ServiceFeeConfig,
     });
@@ -261,13 +319,14 @@ publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
 publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
   try {
     const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
+    const items = await resolvePublicOrderItems(tenant._id, req.body.items ?? []);
 
     const priced = priceOrder({
       fulfilmentType: req.body.fulfilmentType ?? "delivery",
       distanceKm: req.body.distanceKm,
       durationMinutes: req.body.durationMinutes,
       discount: req.body.discount ?? 0,
-      items: req.body.items ?? [],
+      items,
       deliveryPricing: tenant.deliveryPricing as unknown as DeliveryPricingConfig,
       serviceFee: tenant.serviceFee as unknown as ServiceFeeConfig,
     });
