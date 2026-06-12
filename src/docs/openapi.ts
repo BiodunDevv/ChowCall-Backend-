@@ -747,6 +747,53 @@ export const openApiDocument = {
         responses: ok("AI ordering engine response"),
       },
     },
+    "/v1/public-ordering/{tenantSlug}/live-voice/session": {
+      post: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Create an isolated Azure Foundry Live Voice ordering session.",
+        parameters: [{ name: "tenantSlug", in: "path", required: true, schema: { type: "string" } }],
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  clientTimeZone: { type: "string", example: "Africa/Lagos" },
+                },
+              },
+            },
+          },
+        },
+        responses: created("Live voice session created"),
+      },
+    },
+    "/v1/public-ordering/{tenantSlug}/live-voice/stream/{sessionId}": {
+      get: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "WebSocket endpoint for browser audio, live captions, assistant audio, and order updates.",
+        description:
+          "Upgrade this request to WebSocket. Client events include session.start, audio.chunk, audio.mute, audio.unmute, and session.end. Server events include session.ready, caption.user, caption.assistant, assistant.audio, order.updated, payment.ready, payment.paid, error, and session.ended.",
+        parameters: [
+          { name: "tenantSlug", in: "path", required: true, schema: { type: "string" } },
+          { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: ok("WebSocket upgrade endpoint"),
+      },
+    },
+    "/v1/public-ordering/{tenantSlug}/live-voice/session/{sessionId}/order": {
+      get: {
+        tags: ["Public Ordering"],
+        security: publicSecurity,
+        summary: "Fetch the current tenant-scoped order draft for a live voice session.",
+        parameters: [
+          { name: "tenantSlug", in: "path", required: true, schema: { type: "string" } },
+          { name: "sessionId", in: "path", required: true, schema: { type: "string" } },
+        ],
+        responses: ok("Live voice order draft"),
+      },
+    },
     "/v1/public-ordering/{tenantSlug}/quote": {
       post: {
         tags: ["Public Ordering"],
@@ -836,26 +883,6 @@ export const openApiDocument = {
         security: publicSecurity,
         summary: "Future Twilio incoming-call webhook. Phone routing is not part of the active product surface.",
         responses: ok("TwiML response"),
-      },
-    },
-    "/v1/voice/web-token": {
-      post: {
-        tags: ["Voice"],
-        security: publicSecurity,
-        summary: "Create a short-lived Azure Speech token for browser AI voice ordering.",
-        requestBody: {
-          content: {
-            "application/json": {
-              schema: {
-                type: "object",
-                properties: {
-                  tenantSlug: { type: "string", example: "mamaskitchen" },
-                },
-              },
-            },
-          },
-        },
-        responses: ok("Azure Speech token metadata"),
       },
     },
     "/v1/voice/voices": {

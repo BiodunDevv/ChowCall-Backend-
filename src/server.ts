@@ -1,9 +1,11 @@
 import { createServer } from "node:http";
+import type { Socket } from "node:net";
 import { createApp } from "./app.js";
 import { env } from "./config/env.js";
 import { connectDatabase } from "./config/database.js";
 import { connectRedis } from "./config/redis.js";
 import { logger } from "./config/logger.js";
+import { handleLiveVoiceUpgrade } from "./v1/public-ordering/live-voice.routes.js";
 
 async function bootstrap() {
   await connectDatabase();
@@ -11,6 +13,10 @@ async function bootstrap() {
 
   const app = createApp();
   const server = createServer(app);
+  server.on("upgrade", async (req, socket) => {
+    const handled = await handleLiveVoiceUpgrade(req, socket as Socket);
+    if (!handled) socket.destroy();
+  });
 
   server.listen(env.PORT, () => {
     logger.info(renderStartupBanner());

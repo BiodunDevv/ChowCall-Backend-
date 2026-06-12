@@ -16,8 +16,11 @@ import {
   startOrderingSession,
   verifyPublicOrderAccess,
 } from "../ai-ordering/ai-ordering-engine.js";
+import { liveVoiceRouter } from "./live-voice.routes.js";
 
 export const publicOrderingRouter = Router();
+
+publicOrderingRouter.use("/:tenantSlug/live-voice", liveVoiceRouter);
 
 function normalizeMenuName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
