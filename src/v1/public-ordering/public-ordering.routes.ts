@@ -29,7 +29,15 @@ function publicTenantPayload(tenant: {
   address?: string | null;
   openingHours?: unknown;
   subscriptionStatus?: string;
-  voice?: { greeting?: string | null; routingNumber?: string | null; dedicatedNumber?: string | null } | null;
+  voice?: {
+    enabled?: boolean | null;
+    greeting?: string | null;
+    routingNumber?: string | null;
+    dedicatedNumber?: string | null;
+    speechVoiceName?: string | null;
+    speechVoiceStyle?: string | null;
+    speechLanguage?: string | null;
+  } | null;
   aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
   onboarding?: { status?: string | null } | null;
   coverImageUrl?: string | null;
@@ -62,6 +70,15 @@ function publicTenantPayload(tenant: {
     aiGreeting:
       tenant.voice?.greeting ??
       `Hi, welcome to ${tenant.name}. Are you ordering for pickup or delivery today?`,
+    voice: {
+      enabled: tenant.voice?.enabled !== false,
+      greeting:
+        tenant.voice?.greeting ??
+        `Welcome to ${tenant.name}. What would you like to order today?`,
+      speechVoiceName: tenant.voice?.speechVoiceName ?? "en-NG-EzinneNeural",
+      speechVoiceStyle: tenant.voice?.speechVoiceStyle ?? "friendly",
+      speechLanguage: tenant.voice?.speechLanguage ?? "en-NG",
+    },
     aiAgent: {
       enabled: tenant.aiAgent?.enabled !== false,
       instructions: tenant.aiAgent?.instructions ?? "",

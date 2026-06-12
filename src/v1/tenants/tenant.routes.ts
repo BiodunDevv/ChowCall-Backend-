@@ -88,8 +88,12 @@ tenantRouter.patch(
 // ── Phone / voice routing ─────────────────────────────────────────────────────
 
 const phoneSchema = z.object({
-  routingNumber: z.string().min(1),
+  enabled: z.boolean().optional(),
+  routingNumber: z.string().optional(),
   welcomeMessage: z.string().optional(),
+  speechVoiceName: z.string().optional(),
+  speechVoiceStyle: z.string().optional(),
+  speechLanguage: z.string().optional(),
 });
 
 tenantRouter.get("/current/phone", requireTenant, async (req, res) => {
@@ -107,8 +111,12 @@ tenantRouter.patch(
       const tenant = await Tenant.findByIdAndUpdate(
         req.user!.tenantId,
         {
-          "voice.routingNumber": payload.routingNumber,
+          ...(payload.enabled !== undefined && { "voice.enabled": payload.enabled }),
+          ...(payload.routingNumber !== undefined && { "voice.routingNumber": payload.routingNumber.trim() || undefined }),
           ...(payload.welcomeMessage !== undefined && { "voice.greeting": payload.welcomeMessage }),
+          ...(payload.speechVoiceName !== undefined && { "voice.speechVoiceName": payload.speechVoiceName }),
+          ...(payload.speechVoiceStyle !== undefined && { "voice.speechVoiceStyle": payload.speechVoiceStyle }),
+          ...(payload.speechLanguage !== undefined && { "voice.speechLanguage": payload.speechLanguage }),
         },
         { new: true },
       ).select("voice");

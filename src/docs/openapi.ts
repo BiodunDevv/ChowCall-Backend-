@@ -843,7 +843,27 @@ export const openApiDocument = {
         tags: ["Voice"],
         security: publicSecurity,
         summary: "Create a short-lived Azure Speech token for browser AI voice ordering.",
+        requestBody: {
+          content: {
+            "application/json": {
+              schema: {
+                type: "object",
+                properties: {
+                  tenantSlug: { type: "string", example: "mamaskitchen" },
+                },
+              },
+            },
+          },
+        },
         responses: ok("Azure Speech token metadata"),
+      },
+    },
+    "/v1/voice/voices": {
+      get: {
+        tags: ["Voice"],
+        security: publicSecurity,
+        summary: "List allowed Azure neural voices for tenant web voice ordering.",
+        responses: ok("Voice options"),
       },
     },
     "/v1/voice/gather": {

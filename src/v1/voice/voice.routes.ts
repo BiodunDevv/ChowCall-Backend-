@@ -12,7 +12,42 @@ type AzureSpeechTokenResponse = {
   region: string;
   endpoint: string;
   expiresInSeconds: number;
+  voice: TenantVoiceSettings;
 };
+
+type TenantVoiceSettings = {
+  enabled: boolean;
+  greeting: string;
+  speechVoiceName: string;
+  speechVoiceStyle: string;
+  speechLanguage: string;
+};
+
+type VoiceOption = {
+  name: string;
+  displayName: string;
+  locale: string;
+  gender?: string;
+};
+
+const defaultSpeechVoice: TenantVoiceSettings = {
+  enabled: true,
+  greeting: "Welcome. What would you like to order today?",
+  speechVoiceName: "en-NG-EzinneNeural",
+  speechVoiceStyle: "friendly",
+  speechLanguage: "en-NG",
+};
+
+const fallbackVoices: VoiceOption[] = [
+  { name: "en-NG-EzinneNeural", displayName: "Ezinne", locale: "en-NG", gender: "Female" },
+  { name: "en-NG-AbeoNeural", displayName: "Abeo", locale: "en-NG", gender: "Male" },
+  { name: "en-GB-SoniaNeural", displayName: "Sonia", locale: "en-GB", gender: "Female" },
+  { name: "en-GB-RyanNeural", displayName: "Ryan", locale: "en-GB", gender: "Male" },
+  { name: "en-US-JennyNeural", displayName: "Jenny", locale: "en-US", gender: "Female" },
+  { name: "en-US-GuyNeural", displayName: "Guy", locale: "en-US", gender: "Male" },
+];
+
+let cachedVoiceOptions: { expiresAt: number; voices: VoiceOption[]; source: "azure" | "fallback" } | null = null;
 
 function twiml(content: string) {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${content}</Response>`;
@@ -44,8 +79,74 @@ function requireAzureSpeechConfig() {
   }
 }
 
-async function createAzureSpeechToken(): Promise<AzureSpeechTokenResponse> {
+function normalizeTenantVoice(tenant?: {
+  name?: string;
+  voice?: Partial<TenantVoiceSettings> | null;
+} | null): TenantVoiceSettings {
+  const greeting =
+    tenant?.voice?.greeting?.trim() ||
+    (tenant?.name ? `Welcome to ${tenant.name}. What would you like to order today?` : defaultSpeechVoice.greeting);
+
+  return {
+    enabled: tenant?.voice?.enabled !== false,
+    greeting,
+    speechVoiceName: tenant?.voice?.speechVoiceName || defaultSpeechVoice.speechVoiceName,
+    speechVoiceStyle: tenant?.voice?.speechVoiceStyle || defaultSpeechVoice.speechVoiceStyle,
+    speechLanguage: tenant?.voice?.speechLanguage || defaultSpeechVoice.speechLanguage,
+  };
+}
+
+async function fetchVoiceOptions() {
+  if (cachedVoiceOptions && cachedVoiceOptions.expiresAt > Date.now()) return cachedVoiceOptions;
+  if (!env.AZURE_SPEECH_KEY || !env.AZURE_SPEECH_REGION) {
+    cachedVoiceOptions = { expiresAt: Date.now() + 10 * 60_000, voices: fallbackVoices, source: "fallback" };
+    return cachedVoiceOptions;
+  }
+
+  try {
+    const response = await fetch(
+      `https://${env.AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
+      { headers: { "Ocp-Apim-Subscription-Key": env.AZURE_SPEECH_KEY } }
+    );
+    if (!response.ok) throw new Error(`Azure voice list failed: ${response.status}`);
+    const voices = (await response.json()) as Array<{
+      ShortName?: string;
+      LocalName?: string;
+      DisplayName?: string;
+      Locale?: string;
+      Gender?: string;
+      VoiceType?: string;
+    }>;
+    const allowedNames = new Set(fallbackVoices.map((voice) => voice.name));
+    const filtered = voices
+      .filter((voice) => voice.ShortName && allowedNames.has(voice.ShortName) && voice.VoiceType === "Neural")
+      .map((voice) => ({
+        name: voice.ShortName!,
+        displayName: voice.LocalName || voice.DisplayName || voice.ShortName!,
+        locale: voice.Locale || "en-NG",
+        gender: voice.Gender,
+      }));
+
+    cachedVoiceOptions = {
+      expiresAt: Date.now() + 60 * 60_000,
+      voices: filtered.length > 0 ? filtered : fallbackVoices,
+      source: filtered.length > 0 ? "azure" : "fallback",
+    };
+    return cachedVoiceOptions;
+  } catch {
+    cachedVoiceOptions = { expiresAt: Date.now() + 10 * 60_000, voices: fallbackVoices, source: "fallback" };
+    return cachedVoiceOptions;
+  }
+}
+
+async function createAzureSpeechToken(tenantSlug?: string): Promise<AzureSpeechTokenResponse> {
   requireAzureSpeechConfig();
+  const tenant = tenantSlug
+    ? await Tenant.findOne({ slug: tenantSlug }).select("name voice").lean<{
+        name: string;
+        voice?: Partial<TenantVoiceSettings>;
+      }>()
+    : null;
 
   const endpoint = new URL("/sts/v1.0/issueToken", env.AZURE_SPEECH_ENDPOINT);
   const response = await fetch(endpoint, {
@@ -72,12 +173,22 @@ async function createAzureSpeechToken(): Promise<AzureSpeechTokenResponse> {
     region: env.AZURE_SPEECH_REGION,
     endpoint: env.AZURE_SPEECH_ENDPOINT,
     expiresInSeconds: 540,
+    voice: normalizeTenantVoice(tenant),
   };
 }
 
-voiceRouter.post("/web-token", async (_req, res, next) => {
+voiceRouter.post("/web-token", async (req, res, next) => {
   try {
-    const data = await createAzureSpeechToken();
+    const data = await createAzureSpeechToken(typeof req.body?.tenantSlug === "string" ? req.body.tenantSlug : undefined);
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
+
+voiceRouter.get("/voices", async (_req, res, next) => {
+  try {
+    const data = await fetchVoiceOptions();
     res.json({ data });
   } catch (error) {
     next(error);

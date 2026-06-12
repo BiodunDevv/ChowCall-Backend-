@@ -56,7 +56,11 @@ const tenantSchema = new Schema(
       expiryMinutes: { type: Number, default: 15 },
     },
     voice: {
+      enabled: { type: Boolean, default: true },
       greeting: { type: String, default: "Hello, thank you for calling. What would you like to order?" },
+      speechVoiceName: { type: String, default: "en-NG-EzinneNeural" },
+      speechVoiceStyle: { type: String, default: "friendly" },
+      speechLanguage: { type: String, default: "en-NG" },
       routingNumber: String,
       dedicatedNumber: String,
       callerIdTestStatus: { type: String, enum: ["not_tested", "passed", "missing", "inconsistent"], default: "not_tested" },
