@@ -35,6 +35,7 @@ const envSchema = z.object({
   AZURE_OPENAI_DEPLOYMENT_NAME: z.string().optional().default(""),
   AZURE_OPENAI_MODEL_NAME: z.string().optional().default(""),
   AZURE_OPENAI_API_VERSION: z.string().optional().default("2024-04-01-preview"),
+  AZURE_SPEECH_ENDPOINT: z.string().url().optional().default("https://eastus.api.cognitive.microsoft.com/"),
   AZURE_SPEECH_KEY: z.string().optional().default(""),
   AZURE_SPEECH_REGION: z.string().optional().default(""),
   BREVO_API_KEY: z.string().optional().default(""),

@@ -7,6 +7,13 @@ import { VoiceSession } from "../ai-ordering/voice-session.model.js";
 
 export const voiceRouter = Router();
 
+type AzureSpeechTokenResponse = {
+  token: string;
+  region: string;
+  endpoint: string;
+  expiresInSeconds: number;
+};
+
 function twiml(content: string) {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${content}</Response>`;
 }
@@ -26,6 +33,56 @@ function escapeXml(text: string) {
     return map[char] ?? char;
   });
 }
+
+function requireAzureSpeechConfig() {
+  if (!env.AZURE_SPEECH_KEY || !env.AZURE_SPEECH_REGION || !env.AZURE_SPEECH_ENDPOINT) {
+    throw new AppError(
+      503,
+      "Voice ordering is temporarily unavailable.",
+      "AZURE_SPEECH_NOT_CONFIGURED"
+    );
+  }
+}
+
+async function createAzureSpeechToken(): Promise<AzureSpeechTokenResponse> {
+  requireAzureSpeechConfig();
+
+  const endpoint = new URL("/sts/v1.0/issueToken", env.AZURE_SPEECH_ENDPOINT);
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "Ocp-Apim-Subscription-Key": env.AZURE_SPEECH_KEY,
+      "Content-Type": "application/x-www-form-urlencoded",
+      "Content-Length": "0",
+    },
+  });
+
+  const token = await response.text();
+  if (!response.ok || !token) {
+    throw new AppError(
+      502,
+      "Voice ordering is temporarily unavailable.",
+      "AZURE_SPEECH_TOKEN_FAILED",
+      { status: response.status }
+    );
+  }
+
+  return {
+    token,
+    region: env.AZURE_SPEECH_REGION,
+    endpoint: env.AZURE_SPEECH_ENDPOINT,
+    expiresInSeconds: 540,
+  };
+}
+
+voiceRouter.post("/web-token", async (_req, res, next) => {
+  try {
+    const data = await createAzureSpeechToken();
+    res.json({ data });
+  } catch (error) {
+    next(error);
+  }
+});
 
 async function resolveTenantByCalledNumber(calledNumber?: string) {
   if (!calledNumber) return Tenant.findOne({ slug: "mamaskitchen" }).lean();

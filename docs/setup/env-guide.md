@@ -133,8 +133,11 @@ For Azure OpenAI:
 For Azure AI Speech:
 
 - Create Speech resource in Azure.
+- Set `AZURE_SPEECH_ENDPOINT`, for example `https://eastus.api.cognitive.microsoft.com/`.
 - Set `AZURE_SPEECH_KEY`.
 - Set `AZURE_SPEECH_REGION`.
+
+ChowCall exposes a short-lived web speech token for browser microphone ordering. The frontend must never receive or store the Azure Speech key directly.
 
 ## Messaging
 

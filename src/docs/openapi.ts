@@ -838,6 +838,14 @@ export const openApiDocument = {
         responses: ok("TwiML response"),
       },
     },
+    "/v1/voice/web-token": {
+      post: {
+        tags: ["Voice"],
+        security: publicSecurity,
+        summary: "Create a short-lived Azure Speech token for browser AI voice ordering.",
+        responses: ok("Azure Speech token metadata"),
+      },
+    },
     "/v1/voice/gather": {
       post: {
         tags: ["Voice"],
