@@ -18,6 +18,8 @@ const voiceSessionSchema = new Schema(
     liveVoiceSessionId: { type: String, unique: true, sparse: true, index: true },
     callSid: { type: String, unique: true, sparse: true, index: true },
     channel: { type: String, enum: ["web_voice", "phone"], default: "web_voice", index: true },
+    provider: { type: String, default: "aws_nova_sonic" },
+    modelId: String,
     agentName: String,
     agentVersion: String,
     from: String,

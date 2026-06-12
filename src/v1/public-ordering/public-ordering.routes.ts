@@ -17,6 +17,7 @@ import {
   verifyPublicOrderAccess,
 } from "../ai-ordering/ai-ordering-engine.js";
 import { liveVoiceRouter } from "./live-voice.routes.js";
+import { normalizeNovaSonicVoice } from "../../config/voice-options.js";
 
 export const publicOrderingRouter = Router();
 
@@ -90,6 +91,14 @@ function publicTenantPayload(tenant: {
   voice?: {
     enabled?: boolean | null;
     greeting?: string | null;
+    provider?: string | null;
+    modelId?: string | null;
+    language?: string | null;
+    voiceId?: string | null;
+    speakingStyle?: string | null;
+    responseSpeed?: string | null;
+    allowInterruptions?: boolean | null;
+    captionsEnabledByDefault?: boolean | null;
     routingNumber?: string | null;
     dedicatedNumber?: string | null;
     speechVoiceName?: string | null;
@@ -117,6 +126,7 @@ function publicTenantPayload(tenant: {
   deliveryEnabled?: boolean | null;
   estimatedPrepTime?: number | null;
 }) {
+  const voiceSettings = normalizeNovaSonicVoice(tenant.voice ?? null);
   return {
     id: tenant.id ?? String(tenant._id ?? ""),
     name: tenant.name,
@@ -133,9 +143,10 @@ function publicTenantPayload(tenant: {
       greeting:
         tenant.voice?.greeting ??
         `Welcome to ${tenant.name}. What would you like to order today?`,
-      speechVoiceName: tenant.voice?.speechVoiceName ?? "en-NG-EzinneNeural",
-      speechVoiceStyle: tenant.voice?.speechVoiceStyle ?? "friendly",
-      speechLanguage: tenant.voice?.speechLanguage ?? "en-NG",
+      ...voiceSettings,
+      speechVoiceName: voiceSettings.voiceId,
+      speechVoiceStyle: voiceSettings.speakingStyle,
+      speechLanguage: voiceSettings.language,
     },
     aiAgent: {
       enabled: tenant.aiAgent?.enabled !== false,

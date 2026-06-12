@@ -4,6 +4,11 @@ import { AppError } from "../../shared/errors/app-error.js";
 import { Tenant } from "../tenants/tenant.model.js";
 import { handleOrderingMessage, startOrderingSession } from "../ai-ordering/ai-ordering-engine.js";
 import { VoiceSession } from "../ai-ordering/voice-session.model.js";
+import {
+  NOVA_SONIC_MODELS,
+  NOVA_SONIC_V1_VOICES,
+  normalizeNovaSonicVoice,
+} from "../../config/voice-options.js";
 
 export const voiceRouter = Router();
 
@@ -46,8 +51,6 @@ const fallbackVoices: VoiceOption[] = [
   { name: "en-US-JennyNeural", displayName: "Jenny", locale: "en-US", gender: "Female" },
   { name: "en-US-GuyNeural", displayName: "Guy", locale: "en-US", gender: "Male" },
 ];
-
-let cachedVoiceOptions: { expiresAt: number; voices: VoiceOption[]; source: "azure" | "fallback" } | null = null;
 
 function twiml(content: string) {
   return `<?xml version="1.0" encoding="UTF-8"?><Response>${content}</Response>`;
@@ -97,46 +100,20 @@ function normalizeTenantVoice(tenant?: {
 }
 
 async function fetchVoiceOptions() {
-  if (cachedVoiceOptions && cachedVoiceOptions.expiresAt > Date.now()) return cachedVoiceOptions;
-  if (!env.AZURE_SPEECH_KEY || !env.AZURE_SPEECH_REGION) {
-    cachedVoiceOptions = { expiresAt: Date.now() + 10 * 60_000, voices: fallbackVoices, source: "fallback" };
-    return cachedVoiceOptions;
-  }
-
-  try {
-    const response = await fetch(
-      `https://${env.AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/voices/list`,
-      { headers: { "Ocp-Apim-Subscription-Key": env.AZURE_SPEECH_KEY } }
-    );
-    if (!response.ok) throw new Error(`Azure voice list failed: ${response.status}`);
-    const voices = (await response.json()) as Array<{
-      ShortName?: string;
-      LocalName?: string;
-      DisplayName?: string;
-      Locale?: string;
-      Gender?: string;
-      VoiceType?: string;
-    }>;
-    const allowedNames = new Set(fallbackVoices.map((voice) => voice.name));
-    const filtered = voices
-      .filter((voice) => voice.ShortName && allowedNames.has(voice.ShortName) && voice.VoiceType === "Neural")
-      .map((voice) => ({
-        name: voice.ShortName!,
-        displayName: voice.LocalName || voice.DisplayName || voice.ShortName!,
-        locale: voice.Locale || "en-NG",
-        gender: voice.Gender,
-      }));
-
-    cachedVoiceOptions = {
-      expiresAt: Date.now() + 60 * 60_000,
-      voices: filtered.length > 0 ? filtered : fallbackVoices,
-      source: filtered.length > 0 ? "azure" : "fallback",
-    };
-    return cachedVoiceOptions;
-  } catch {
-    cachedVoiceOptions = { expiresAt: Date.now() + 10 * 60_000, voices: fallbackVoices, source: "fallback" };
-    return cachedVoiceOptions;
-  }
+  const voices = NOVA_SONIC_V1_VOICES.flatMap((group) =>
+    group.voices.map((voice) => ({
+      name: voice.id,
+      displayName: voice.label,
+      locale: group.language,
+      gender: voice.genderSound,
+    })),
+  );
+  return {
+    voices,
+    models: NOVA_SONIC_MODELS,
+    voiceOptions: NOVA_SONIC_V1_VOICES,
+    source: "aws_nova_sonic",
+  };
 }
 
 async function createAzureSpeechToken(tenantSlug?: string): Promise<AzureSpeechTokenResponse> {

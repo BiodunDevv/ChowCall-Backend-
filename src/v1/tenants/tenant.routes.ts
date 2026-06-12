@@ -4,6 +4,13 @@ import { Tenant } from "./tenant.model.js";
 import { requireAuth } from "../../shared/middleware/auth.js";
 import { requireRoles } from "../../shared/middleware/rbac.js";
 import { requireTenant } from "../../shared/middleware/tenant-scope.js";
+import { AppError } from "../../shared/errors/app-error.js";
+import {
+  NOVA_SONIC_MODELS,
+  NOVA_SONIC_V1_VOICES,
+  isValidNovaSonicVoice,
+  normalizeNovaSonicVoice,
+} from "../../config/voice-options.js";
 
 export const tenantRouter = Router();
 
@@ -91,6 +98,14 @@ const phoneSchema = z.object({
   enabled: z.boolean().optional(),
   phone: z.string().optional(),
   welcomeMessage: z.string().optional(),
+  provider: z.literal("aws_nova_sonic").optional(),
+  modelId: z.string().optional(),
+  language: z.string().optional(),
+  voiceId: z.string().optional(),
+  speakingStyle: z.enum(["friendly", "professional", "warm", "fast", "calm"]).optional(),
+  responseSpeed: z.enum(["normal", "fast"]).optional(),
+  allowInterruptions: z.boolean().optional(),
+  captionsEnabledByDefault: z.boolean().optional(),
   speechVoiceName: z.string().optional(),
   speechVoiceStyle: z.string().optional(),
   speechLanguage: z.string().optional(),
@@ -106,6 +121,9 @@ tenantRouter.get("/current/phone", requireTenant, async (req, res) => {
   res.json({
     data: {
       ...(tenant?.voice ?? {}),
+      voiceSettings: normalizeNovaSonicVoice(tenant?.voice ?? null),
+      models: NOVA_SONIC_MODELS,
+      voiceOptions: NOVA_SONIC_V1_VOICES,
       phone: tenant?.phone ?? "",
       instructions: tenant?.aiAgent?.instructions ?? "",
     },
@@ -119,12 +137,25 @@ tenantRouter.patch(
   async (req, res, next) => {
     try {
       const payload = phoneSchema.parse(req.body);
+      const language = payload.language ?? payload.speechLanguage;
+      const voiceId = payload.voiceId ?? payload.speechVoiceName;
+      if (language && voiceId && !isValidNovaSonicVoice(language, voiceId)) {
+        throw new AppError(400, "That voice is not available for the selected language.", "INVALID_VOICE_LANGUAGE");
+      }
       const tenant = await Tenant.findByIdAndUpdate(
         req.user!.tenantId,
         {
           ...(payload.phone !== undefined && { phone: payload.phone.trim() || undefined }),
           ...(payload.enabled !== undefined && { "voice.enabled": payload.enabled }),
           ...(payload.welcomeMessage !== undefined && { "voice.greeting": payload.welcomeMessage }),
+          "voice.provider": "aws_nova_sonic",
+          ...(payload.modelId !== undefined && { "voice.modelId": payload.modelId }),
+          ...(language !== undefined && { "voice.language": language }),
+          ...(voiceId !== undefined && { "voice.voiceId": voiceId }),
+          ...(payload.speakingStyle !== undefined && { "voice.speakingStyle": payload.speakingStyle }),
+          ...(payload.responseSpeed !== undefined && { "voice.responseSpeed": payload.responseSpeed }),
+          ...(payload.allowInterruptions !== undefined && { "voice.allowInterruptions": payload.allowInterruptions }),
+          ...(payload.captionsEnabledByDefault !== undefined && { "voice.captionsEnabledByDefault": payload.captionsEnabledByDefault }),
           ...(payload.speechVoiceName !== undefined && { "voice.speechVoiceName": payload.speechVoiceName }),
           ...(payload.speechVoiceStyle !== undefined && { "voice.speechVoiceStyle": payload.speechVoiceStyle }),
           ...(payload.speechLanguage !== undefined && { "voice.speechLanguage": payload.speechLanguage }),
@@ -135,6 +166,9 @@ tenantRouter.patch(
       res.json({
         data: {
           ...((tenant as { voice?: Record<string, unknown> } | null)?.voice ?? {}),
+          voiceSettings: normalizeNovaSonicVoice((tenant as { voice?: Record<string, unknown> } | null)?.voice ?? null),
+          models: NOVA_SONIC_MODELS,
+          voiceOptions: NOVA_SONIC_V1_VOICES,
           phone: (tenant as { phone?: string } | null)?.phone ?? "",
           instructions: (tenant as { aiAgent?: { instructions?: string } } | null)?.aiAgent?.instructions ?? "",
         },

@@ -4,10 +4,12 @@ import type { Socket } from "node:net";
 import { Router } from "express";
 import { AppError } from "../../shared/errors/app-error.js";
 import {
-  AzureVoiceLiveBridge,
-  azureVoiceLiveService,
+  AwsNovaSonicBridge,
+  awsNovaSonicService,
+  type NovaSonicVoiceSettings,
   type VoiceLiveServerEvent,
-} from "../../providers/voice/azure-voice-live.service.js";
+} from "../../providers/voice/aws-nova-sonic.service.js";
+import { normalizeNovaSonicVoice } from "../../config/voice-options.js";
 import { Tenant } from "../tenants/tenant.model.js";
 import { MenuItem } from "../menu/menu-item.model.js";
 import { ChatSession } from "../ai-ordering/chat-session.model.js";
@@ -15,12 +17,16 @@ import { VoiceSession } from "../ai-ordering/voice-session.model.js";
 import { handleOrderingMessage, startOrderingSession } from "../ai-ordering/ai-ordering-engine.js";
 
 export const liveVoiceRouter = Router({ mergeParams: true });
-const liveVoiceBridges = new Map<string, AzureVoiceLiveBridge>();
+const liveVoiceBridges = new Map<string, AwsNovaSonicBridge>();
 
-function normalizeTenantVoice(tenant: { name: string; voice?: { greeting?: string | null; enabled?: boolean | null } | null }) {
+function normalizeTenantVoice(tenant: {
+  name: string;
+  voice?: ({ greeting?: string | null; enabled?: boolean | null } & Partial<NovaSonicVoiceSettings>) | null;
+}) {
   return {
     enabled: tenant.voice?.enabled !== false,
     greeting: tenant.voice?.greeting?.trim() || `Welcome to ${tenant.name}. What would you like to order today?`,
+    settings: normalizeNovaSonicVoice(tenant.voice),
   };
 }
 
@@ -30,7 +36,7 @@ async function resolveTenant(tenantSlug: string, requireActive = true) {
     name: string;
     slug: string;
     subscriptionStatus?: string | null;
-    voice?: { enabled?: boolean | null; greeting?: string | null } | null;
+    voice?: ({ enabled?: boolean | null; greeting?: string | null } & Partial<NovaSonicVoiceSettings>) | null;
   }>();
   if (!tenant) throw new AppError(404, "Restaurant not found.", "TENANT_NOT_FOUND");
   if (requireActive && tenant.subscriptionStatus !== "active") {
@@ -55,6 +61,8 @@ function sessionPayload(session: {
   paymentStatus?: string | null;
   agentName?: string | null;
   agentVersion?: string | null;
+  provider?: string | null;
+  modelId?: string | null;
 }) {
   return {
     sessionId: session.liveVoiceSessionId,
@@ -65,6 +73,8 @@ function sessionPayload(session: {
     connectionMode: "backend_proxy",
     status: session.status,
     paymentStatus: session.paymentStatus,
+    provider: session.provider ?? "aws_nova_sonic",
+    modelId: session.modelId ?? session.agentVersion,
   };
 }
 
@@ -108,7 +118,7 @@ liveVoiceRouter.post("/session", async (req, res, next) => {
     const tenant = await resolveTenant(tenantSlug);
     const voice = normalizeTenantVoice(tenant);
     const ordering = await startOrderingSession(tenant.slug);
-    const metadata = azureVoiceLiveService.sessionMetadata();
+    const metadata = awsNovaSonicService.sessionMetadata();
     const liveVoiceSessionId = `live_${randomUUID().replace(/-/g, "")}`;
     const voiceSession = await VoiceSession.create({
       tenantId: tenant._id,
@@ -120,6 +130,8 @@ liveVoiceRouter.post("/session", async (req, res, next) => {
       chatSessionId: ordering.session?.id,
       agentName: metadata.agentName,
       agentVersion: metadata.agentVersion,
+      provider: metadata.provider,
+      modelId: voice.settings.modelId,
       paymentStatus: "not_ready",
       expiresAt: new Date(Date.now() + 2 * 60 * 60 * 1000),
       turns: [{ assistantText: voice.greeting, confidence: 1 }],
@@ -130,7 +142,10 @@ liveVoiceRouter.post("/session", async (req, res, next) => {
         ...sessionPayload(voiceSession),
         tenantId: String(tenant._id),
         status: "created",
-        foundryConfigured: azureVoiceLiveService.isConfigured(),
+        provider: metadata.provider,
+        modelId: voice.settings.modelId,
+        voiceSettings: voice.settings,
+        bedrockConfigured: awsNovaSonicService.isConfigured(),
       },
     });
   } catch (error) {
@@ -274,7 +289,7 @@ function send(socket: Socket, event: VoiceLiveServerEvent) {
     socket.write(encodeFrame(JSON.stringify(event)));
     return true;
   } catch {
-    // Browser closed the WebSocket while Azure was still emitting events.
+    // Browser closed the WebSocket while the voice provider was still emitting events.
     return false;
   }
 }
@@ -292,6 +307,7 @@ function closeSocket(socket: Socket, code = 1000, reason = "Session ended") {
 function buildVoiceInstructions(args: {
   tenantName: string;
   greeting: string;
+  voiceSettings: NovaSonicVoiceSettings;
   menuItems: Array<{ name?: string; category?: string; basePrice?: number; isAvailable?: boolean }>;
 }) {
   const menuSummary = args.menuItems
@@ -306,7 +322,9 @@ function buildVoiceInstructions(args: {
     "Only discuss food ordering for this restaurant. If the customer asks for something unrelated, gently redirect them back to ordering.",
     "Do not invent menu items, prices, discounts, delivery fees, or payment details.",
     "When the customer asks for the menu, summarize the available menu and say they can also tap the Menu button to view everything.",
+    "Understand common Nigerian food-ordering phrasing like abeg, I wan order, make am spicy, no pepper, and add extra chicken, but do not overuse slang.",
     `Restaurant greeting: ${args.greeting}`,
+    `Voice style: ${args.voiceSettings.speakingStyle}. Response speed: ${args.voiceSettings.responseSpeed}.`,
     `Available menu context: ${menuSummary || "No menu items are currently available."}`,
   ].join("\n");
 }
@@ -335,7 +353,7 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
 
   const tenantSlug = decodeURIComponent(match[1]);
   const sessionId = decodeURIComponent(match[2]);
-  let bridge: AzureVoiceLiveBridge | null = null;
+  let bridge: AwsNovaSonicBridge | null = null;
   let cleanedUp = false;
   const cleanup = () => {
     if (cleanedUp) return;
@@ -354,9 +372,9 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
     voiceSession.status = "active";
     await voiceSession.save();
 
-    if (!azureVoiceLiveService.isConfigured()) {
-      send(socket, azureVoiceLiveService.unavailableEvent());
-      closeSocket(socket, 1011, "Voice Live not configured");
+    if (!awsNovaSonicService.isConfigured()) {
+      send(socket, awsNovaSonicService.unavailableEvent());
+      closeSocket(socket, 1011, "Nova Sonic not configured");
       return true;
     }
 
@@ -365,18 +383,24 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
       .sort({ category: 1, name: 1 })
       .lean<Array<{ name?: string; category?: string; basePrice?: number; isAvailable?: boolean }>>();
 
-    bridge = new AzureVoiceLiveBridge({
+    bridge = new AwsNovaSonicBridge({
       sessionId,
       tenantSlug,
       tenantName: tenant.name,
       greeting: voice.greeting,
-      instructions: buildVoiceInstructions({ tenantName: tenant.name, greeting: voice.greeting, menuItems }),
+      voiceSettings: voice.settings,
+      instructions: buildVoiceInstructions({
+        tenantName: tenant.name,
+        greeting: voice.greeting,
+        voiceSettings: voice.settings,
+        menuItems,
+      }),
       send: (event) => {
         if (!isSocketOpen(socket)) return;
         send(socket, event);
-        if (event.type === "error" && event.code.startsWith("AZURE_VOICE_LIVE")) {
+        if (event.type === "error" && event.code.startsWith("AWS_NOVA_SONIC")) {
           cleanup();
-          closeSocket(socket, 1011, "Azure Voice Live unavailable");
+          closeSocket(socket, 1011, "Nova Sonic unavailable");
         }
       },
       onUserTranscript: async (transcript) => {
@@ -412,7 +436,7 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
           if (event.type === "audio.chunk" || event.type === "audio_chunk") {
             void bridge.sendAudio(event.audio ?? event.data).catch((error) => {
               const message = error instanceof Error ? error.message : String(error);
-              console.error(`[VoiceLive:audio_route] ${message}`);
+              console.error(`[NovaSonic:audio_route] ${message}`);
             });
           }
           if (event.type === "interrupt") {
