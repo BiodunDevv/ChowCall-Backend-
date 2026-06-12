@@ -85,20 +85,31 @@ tenantRouter.patch(
   },
 );
 
-// ── Phone / voice routing ─────────────────────────────────────────────────────
+// ── Web AI voice ordering ─────────────────────────────────────────────────────
 
 const phoneSchema = z.object({
   enabled: z.boolean().optional(),
-  routingNumber: z.string().optional(),
+  phone: z.string().optional(),
   welcomeMessage: z.string().optional(),
   speechVoiceName: z.string().optional(),
   speechVoiceStyle: z.string().optional(),
   speechLanguage: z.string().optional(),
+  instructions: z.string().optional(),
 });
 
 tenantRouter.get("/current/phone", requireTenant, async (req, res) => {
-  const tenant = await Tenant.findById(req.user!.tenantId).select("voice").lean();
-  res.json({ data: tenant?.voice ?? {} });
+  const tenant = await Tenant.findById(req.user!.tenantId).select("phone voice aiAgent").lean<{
+    phone?: string;
+    voice?: Record<string, unknown>;
+    aiAgent?: { instructions?: string; enabled?: boolean };
+  }>();
+  res.json({
+    data: {
+      ...(tenant?.voice ?? {}),
+      phone: tenant?.phone ?? "",
+      instructions: tenant?.aiAgent?.instructions ?? "",
+    },
+  });
 });
 
 tenantRouter.patch(
@@ -111,16 +122,23 @@ tenantRouter.patch(
       const tenant = await Tenant.findByIdAndUpdate(
         req.user!.tenantId,
         {
+          ...(payload.phone !== undefined && { phone: payload.phone.trim() || undefined }),
           ...(payload.enabled !== undefined && { "voice.enabled": payload.enabled }),
-          ...(payload.routingNumber !== undefined && { "voice.routingNumber": payload.routingNumber.trim() || undefined }),
           ...(payload.welcomeMessage !== undefined && { "voice.greeting": payload.welcomeMessage }),
           ...(payload.speechVoiceName !== undefined && { "voice.speechVoiceName": payload.speechVoiceName }),
           ...(payload.speechVoiceStyle !== undefined && { "voice.speechVoiceStyle": payload.speechVoiceStyle }),
           ...(payload.speechLanguage !== undefined && { "voice.speechLanguage": payload.speechLanguage }),
+          ...(payload.instructions !== undefined && { "aiAgent.enabled": true, "aiAgent.instructions": payload.instructions.trim() }),
         },
         { new: true },
-      ).select("voice");
-      res.json({ data: tenant?.voice ?? {} });
+      ).select("phone voice aiAgent");
+      res.json({
+        data: {
+          ...((tenant as { voice?: Record<string, unknown> } | null)?.voice ?? {}),
+          phone: (tenant as { phone?: string } | null)?.phone ?? "",
+          instructions: (tenant as { aiAgent?: { instructions?: string } } | null)?.aiAgent?.instructions ?? "",
+        },
+      });
     } catch (err) {
       next(err);
     }

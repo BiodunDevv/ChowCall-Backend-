@@ -64,7 +64,7 @@ function publicTenantPayload(tenant: {
     name: tenant.name,
     slug: tenant.slug,
     logo: tenant.logo ?? null,
-    phone: tenant.voice?.routingNumber ?? tenant.voice?.dedicatedNumber ?? tenant.phone ?? null,
+    phone: tenant.phone ?? null,
     address: tenant.address ?? null,
     openingHours: tenant.openingHours ?? {},
     aiGreeting:
@@ -84,7 +84,7 @@ function publicTenantPayload(tenant: {
       instructions: tenant.aiAgent?.instructions ?? "",
     },
     subscriptionStatus: tenant.subscriptionStatus,
-    active: tenant.subscriptionStatus === "active" || tenant.onboarding?.status === "live",
+    active: tenant.subscriptionStatus === "active",
     coverImageUrl: tenant.coverImageUrl ?? null,
     heroImageLightUrl: tenant.heroImageLightUrl ?? null,
     heroImageDarkUrl: tenant.heroImageDarkUrl ?? null,
@@ -106,11 +106,17 @@ function publicTenantPayload(tenant: {
   };
 }
 
-async function resolvePublicTenant(tenantSlug: string) {
+async function resolvePublicTenant(tenantSlug: string, options: { requireActive?: boolean } = {}) {
   const tenant = await Tenant.findOne({ slug: tenantSlug }).lean();
   if (!tenant) throw new AppError(404, "Restaurant not found", "TENANT_NOT_FOUND");
   const payload = publicTenantPayload(tenant);
-  if (!payload.active) throw new AppError(404, "Restaurant is not active yet", "TENANT_INACTIVE");
+  if (options.requireActive && !payload.active) {
+    throw new AppError(
+      403,
+      "AI ordering is available after this restaurant activates ChowCall.",
+      "AI_ORDERING_REQUIRES_ACTIVE_SUBSCRIPTION"
+    );
+  }
   return { tenant, payload };
 }
 
@@ -193,7 +199,7 @@ publicOrderingRouter.post("/:tenantSlug/orders", async (req, res, next) => {
 
 publicOrderingRouter.post("/:tenantSlug/orders/:orderId/confirm", async (req, res, next) => {
   try {
-    const { tenant } = await resolvePublicTenant(req.params.tenantSlug);
+    const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
     const order = await Order.findOne({ _id: req.params.orderId, tenantId: tenant._id }).select("+publicStatusTokenHash");
     if (!order) throw new AppError(404, "Order not found", "ORDER_NOT_FOUND");
     if (
@@ -229,7 +235,7 @@ publicOrderingRouter.post("/:tenantSlug/orders/:orderId/payment-link", async (re
 
 publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
   try {
-    const { tenant } = await resolvePublicTenant(req.params.tenantSlug);
+    const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
 
     const priced = priceOrder({
       fulfilmentType: req.body.fulfilmentType ?? "delivery",
@@ -254,7 +260,7 @@ publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
 
 publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
   try {
-    const { tenant } = await resolvePublicTenant(req.params.tenantSlug);
+    const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
 
     const priced = priceOrder({
       fulfilmentType: req.body.fulfilmentType ?? "delivery",

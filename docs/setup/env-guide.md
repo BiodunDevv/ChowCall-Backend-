@@ -155,7 +155,7 @@ SMS provider default: Twilio.
    - `TWILIO_STATUS_CALLBACK_URL=https://your-api-domain.com/v1/voice/status`
    - `VOICE_MODE=gather`
 
-Voice ordering starts in Twilio gather mode. Set `TWILIO_MEDIA_STREAM_URL` and `VOICE_MODE=media_stream` only when realtime media streaming is configured; otherwise ChowCall falls back to gather mode.
+Web AI voice ordering uses Azure Speech tokens issued by the backend. Twilio phone routing is scaffolded for future use; keep `VOICE_MODE=gather` locally unless phone routing is deliberately re-enabled.
 
 For trial Twilio accounts, the recipient number must usually be verified in Twilio before test messages can be delivered.
 

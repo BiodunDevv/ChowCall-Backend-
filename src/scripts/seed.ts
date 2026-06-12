@@ -35,7 +35,18 @@ async function seed() {
     address: "12 Adeola Odeku Street, Victoria Island, Lagos",
     subscriptionStatus: "active",
     onboarding: { status: "live" },
-    aiAgent: { enabled: true, instructions: "Greet customers warmly, upsell drinks with every order." },
+    aiAgent: {
+      enabled: true,
+      instructions:
+        "Greet customers warmly, answer menu questions clearly, suggest chilled zobo or Chapman with rice meals, and ask one follow-up question when an order is unclear.",
+    },
+    voice: {
+      enabled: true,
+      greeting: "Welcome to Mama's Kitchen. What would you like to order today?",
+      speechVoiceName: "en-NG-EzinneNeural",
+      speechVoiceStyle: "friendly",
+      speechLanguage: "en-NG",
+    },
     deliveryPricing: {
       mode: "distance",
       baseFee: 700,

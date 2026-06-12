@@ -603,8 +603,8 @@ export const openApiDocument = {
         responses: ok("Webhook accepted"),
       },
     },
-    "/v1/calls": placeholderGet("Calls", "Manage inbound call sessions and routing state."),
-    "/v1/voice": placeholderGet("Voice", "AI voice tool endpoints and voice gateway scaffold."),
+    "/v1/calls": placeholderGet("Calls", "Future phone-routing support. Web AI voice ordering is the active customer channel."),
+    "/v1/voice": placeholderGet("Voice", "Web AI voice token, voice options, and future phone-routing scaffold."),
     "/v1/notifications": {
       get: {
         tags: ["Notifications"],
@@ -718,7 +718,7 @@ export const openApiDocument = {
       post: {
         tags: ["Public Ordering"],
         security: publicSecurity,
-        summary: "Start a backend AI ordering session for chat or customer web ordering.",
+        summary: "Start a backend AI ordering session for customer web voice ordering.",
         parameters: [{ name: "tenantSlug", in: "path", required: true, schema: { type: "string" } }],
         responses: created("AI ordering session started"),
       },
@@ -834,7 +834,7 @@ export const openApiDocument = {
       post: {
         tags: ["Voice"],
         security: publicSecurity,
-        summary: "Twilio incoming-call webhook for gather-mode AI ordering.",
+        summary: "Future Twilio incoming-call webhook. Phone routing is not part of the active product surface.",
         responses: ok("TwiML response"),
       },
     },
@@ -870,7 +870,7 @@ export const openApiDocument = {
       post: {
         tags: ["Voice"],
         security: publicSecurity,
-        summary: "Twilio gather webhook that sends transcript text to the shared ordering engine.",
+        summary: "Future Twilio gather webhook that sends transcript text to the shared ordering engine.",
         responses: ok("TwiML response"),
       },
     },

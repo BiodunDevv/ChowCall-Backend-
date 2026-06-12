@@ -142,11 +142,23 @@ async function fetchVoiceOptions() {
 async function createAzureSpeechToken(tenantSlug?: string): Promise<AzureSpeechTokenResponse> {
   requireAzureSpeechConfig();
   const tenant = tenantSlug
-    ? await Tenant.findOne({ slug: tenantSlug }).select("name voice").lean<{
+    ? await Tenant.findOne({ slug: tenantSlug }).select("name voice subscriptionStatus").lean<{
         name: string;
+        subscriptionStatus?: string;
         voice?: Partial<TenantVoiceSettings>;
       }>()
     : null;
+  if (tenantSlug && !tenant) throw new AppError(404, "Restaurant not found.", "TENANT_NOT_FOUND");
+  if (tenantSlug && tenant?.subscriptionStatus !== "active") {
+    throw new AppError(
+      403,
+      "AI ordering is available after this restaurant activates ChowCall.",
+      "AI_ORDERING_REQUIRES_ACTIVE_SUBSCRIPTION"
+    );
+  }
+  if (tenantSlug && tenant?.voice?.enabled === false) {
+    throw new AppError(404, "AI ordering is not active for this restaurant.", "AI_ORDERING_DISABLED");
+  }
 
   const endpoint = new URL("/sts/v1.0/issueToken", env.AZURE_SPEECH_ENDPOINT);
   const response = await fetch(endpoint, {

@@ -1,6 +1,7 @@
 import { randomBytes, createHash } from "node:crypto";
 import type { FilterQuery } from "mongoose";
 import { AppError } from "../../shared/errors/app-error.js";
+import { azureOpenAiProvider } from "../../providers/ai/azure-openai.provider.js";
 import { createReference } from "../../shared/utils/reference.js";
 import { mapboxMapsProvider } from "../../providers/maps/mapbox-maps.provider.js";
 import { twilioSmsProvider } from "../../providers/messaging/twilio-sms.provider.js";
@@ -26,6 +27,8 @@ type PublicTenantDoc = {
   serviceFee?: unknown;
   payment?: { provider?: "paystack" | "flutterwave"; payOnDeliveryEnabled?: boolean } | null;
   aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
+  voice?: { enabled?: boolean | null } | null;
+  subscriptionStatus?: string | null;
 };
 
 type MenuDoc = {
@@ -150,6 +153,65 @@ function matchMenuItems(message: string, menuItems: MenuDoc[]) {
   return { added, unavailable, ambiguous };
 }
 
+function groupMenuSummary(tenant: PublicTenantDoc, menuItems: MenuDoc[]) {
+  const available = menuItems.filter((item) => item.available);
+  if (available.length === 0) {
+    return `${tenant.name} does not have available menu items right now. Please check the Menu button again later.`;
+  }
+  const groups = new Map<string, string[]>();
+  for (const item of available) {
+    const category = item.category || "Menu";
+    const current = groups.get(category) ?? [];
+    current.push(`${item.name} for NGN ${Math.round(item.basePrice).toLocaleString("en-NG")}`);
+    groups.set(category, current);
+  }
+  const summary = Array.from(groups.entries())
+    .map(([category, items]) => `${category}: ${items.join(", ")}`)
+    .join(". ");
+  return `${summary}. You can also tap the Menu button to view everything.`;
+}
+
+function resolveAiItems(
+  aiItems: Array<{ menuItemId?: string; name?: string; quantity?: number }>,
+  menuItems: MenuDoc[]
+) {
+  const added: DraftItem[] = [];
+  const unavailable: string[] = [];
+  const ambiguous: string[] = [];
+
+  for (const aiItem of aiItems) {
+    const requestedName = aiItem.name?.trim() || "";
+    const requestedId = aiItem.menuItemId?.trim();
+    const quantity = Math.max(1, Math.min(20, Number(aiItem.quantity ?? 1) || 1));
+    const exact = requestedId
+      ? menuItems.find((item) => String(item._id) === requestedId)
+      : menuItems.find((item) => normalize(item.name) === normalize(requestedName));
+
+    if (exact) {
+      if (!exact.available) {
+        unavailable.push(exact.name);
+      } else {
+        added.push(asDraftItem(exact, quantity));
+      }
+      continue;
+    }
+
+    const normalizedName = normalize(requestedName);
+    const candidates = normalizedName
+      ? menuItems.filter((item) => normalize(item.name).includes(normalizedName) || normalizedName.includes(normalize(item.name)))
+      : [];
+    if (candidates.length === 1) {
+      const item = candidates[0];
+      if (!item.available) unavailable.push(item.name);
+      else added.push(asDraftItem(item, quantity));
+    } else if (requestedName) {
+      ambiguous.push(requestedName);
+    }
+  }
+
+  return { added, unavailable, ambiguous };
+}
+
 function detectFulfilment(message: string) {
   const text = normalize(message);
   if (/\b(deliver|delivery|send|bring)\b/.test(text)) return "delivery" as const;
@@ -170,8 +232,10 @@ function detectCustomerPatch(message: string, currentFulfilment?: string | null)
 async function resolveTenant(tenantSlug: string) {
   const tenant = await Tenant.findOne({ slug: tenantSlug }).lean<PublicTenantDoc>();
   if (!tenant) throw new AppError(404, "Restaurant not found", "TENANT_NOT_FOUND");
-  const active = tenant.aiAgent?.enabled !== false;
-  if (!active) throw new AppError(404, "AI ordering is not active for this restaurant.", "AI_ORDERING_DISABLED");
+  if (tenant.subscriptionStatus !== "active") {
+    throw new AppError(403, "AI ordering is available after this restaurant activates ChowCall.", "AI_ORDERING_REQUIRES_ACTIVE_SUBSCRIPTION");
+  }
+  if (tenant.voice?.enabled === false) throw new AppError(404, "AI ordering is not active for this restaurant.", "AI_ORDERING_DISABLED");
   return tenant;
 }
 
@@ -284,7 +348,7 @@ function publicSessionPayload(session: {
 
 export async function startOrderingSession(tenantSlug: string) {
   const tenant = await resolveTenant(tenantSlug);
-  const greeting = `Hi, welcome to ${tenant.name}. Tell me what you would like to order, then I will confirm pickup or delivery and price it for payment.`;
+  const greeting = `Hi, welcome to ${tenant.name}. Tell me what you would like to order, or ask what is on the menu.`;
   const session = await ChatSession.create({
     tenantId: tenantId(tenant),
     tenantSlug: tenant.slug,
@@ -315,13 +379,62 @@ export async function handleOrderingMessage(input: { tenantSlug: string; session
   const session = existing ?? (await ChatSession.findById(start?.session?.id));
   if (!session) throw new AppError(500, "Unable to start order session.", "CHAT_SESSION_CREATE_FAILED");
 
-  const { added, unavailable, ambiguous } = matchMenuItems(input.message, menuItems);
-  const fulfilment = detectFulfilment(input.message) ?? session.fulfilmentType;
-  const customerPatch = detectCustomerPatch(input.message, fulfilment);
+  let aiTurn: Awaited<ReturnType<NonNullable<typeof azureOpenAiProvider.interpretOrderingTurn>>> | null = null;
+  try {
+    aiTurn = await azureOpenAiProvider.interpretOrderingTurn?.({
+      tenant: { name: tenant.name, instructions: tenant.aiAgent?.instructions ?? "" },
+      menu: menuItems.map((item) => ({
+        id: String(item._id),
+        name: item.name,
+        category: item.category,
+        description: item.description,
+        price: Number(item.basePrice ?? 0),
+        available: item.available,
+      })),
+      conversation: (session.messages ?? []).map((message) => ({
+        role: message.role as "assistant" | "user" | "system",
+        content: message.content,
+      })),
+      currentDraft: {
+        items: (session.items as DraftItem[]).map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          unitPrice: item.unitPrice,
+        })),
+        fulfilmentType: session.fulfilmentType,
+        customer: session.customer as Record<string, unknown>,
+      },
+      transcript: input.message,
+    }) ?? null;
+  } catch {
+    aiTurn = null;
+  }
+
+  const menuRequested = /\b(menu|what.?s available|what do you have|options|food|eat|list)\b/i.test(input.message);
+  const offTopic = aiTurn?.intent === "off_topic";
+  const clarificationOnly = offTopic || aiTurn?.intent === "clarify" || aiTurn?.clarificationNeeded;
+  const aiResolved = aiTurn && !clarificationOnly && aiTurn.intent !== "menu"
+    ? resolveAiItems(aiTurn.items, menuItems)
+    : { added: [], unavailable: [], ambiguous: [] };
+  const fallback = !aiTurn && !menuRequested ? matchMenuItems(input.message, menuItems) : { added: [], unavailable: [], ambiguous: [] };
+  const added = aiResolved.added.length || aiResolved.unavailable.length || aiResolved.ambiguous.length ? aiResolved.added : fallback.added;
+  const unavailable = [...aiResolved.unavailable, ...fallback.unavailable];
+  const ambiguous = [...aiResolved.ambiguous, ...fallback.ambiguous];
+  const fulfilment = aiTurn?.fulfilmentType ?? detectFulfilment(input.message) ?? session.fulfilmentType;
+  const detectedCustomer = detectCustomerPatch(input.message, fulfilment);
+  const customerPatch = {
+    ...detectedCustomer,
+    ...(aiTurn?.customer?.name ? { name: aiTurn.customer.name } : {}),
+    ...(aiTurn?.customer?.phone ? { phone: aiTurn.customer.phone } : {}),
+    ...(aiTurn?.customer?.email ? { email: aiTurn.customer.email } : {}),
+    ...(aiTurn?.customer?.address ? { address: aiTurn.customer.address } : {}),
+  };
   const items = mergeDraftItems(session.items as DraftItem[], added);
   const customer = {
     ...(session.customer ?? {}),
+    ...(customerPatch.name ? { name: customerPatch.name } : {}),
     ...(customerPatch.phone ? { phone: customerPatch.phone } : {}),
+    ...(customerPatch.email ? { email: customerPatch.email } : {}),
     ...(customerPatch.address ? { address: customerPatch.address } : {}),
   };
   const priced = await priceDraft({ tenant, items, fulfilmentType: fulfilment, customer: customer as { address?: string } });
@@ -331,14 +444,20 @@ export async function handleOrderingMessage(input: { tenantSlug: string; session
     fulfilmentType: fulfilment,
     customer: resolvedCustomer as { name?: string; phone?: string; email?: string; address?: string },
   });
-  const reply = assistantMessage({
-    tenant,
-    added,
-    unavailable,
-    ambiguous,
-    needs,
-    total: priced.pricing?.totalPayable,
-  });
+  const reply = menuRequested || aiTurn?.intent === "menu"
+    ? groupMenuSummary(tenant, menuItems)
+    : clarificationOnly && aiTurn?.assistantMessage
+      ? aiTurn.assistantMessage
+      : unavailable.length || ambiguous.length || added.length || !aiTurn?.assistantMessage
+        ? assistantMessage({
+            tenant,
+            added,
+            unavailable,
+            ambiguous,
+            needs,
+            total: priced.pricing?.totalPayable,
+          })
+        : aiTurn.assistantMessage;
 
   session.items = priced.items as never;
   session.fulfilmentType = fulfilment ?? undefined;
@@ -348,7 +467,7 @@ export async function handleOrderingMessage(input: { tenantSlug: string; session
   session.status = needs.length === 0 ? "ready_for_payment" : "active";
   session.lastAssistantMessage = reply;
   session.messages.push({ role: "user", content: input.message });
-  session.messages.push({ role: "assistant", content: reply, metadata: { added, unavailable, ambiguous, needs } });
+  session.messages.push({ role: "assistant", content: reply, metadata: { added, unavailable, ambiguous, needs, intent: aiTurn?.intent ?? "deterministic" } });
   await session.save();
 
   return {

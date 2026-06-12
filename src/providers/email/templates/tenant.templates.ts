@@ -20,10 +20,10 @@ export function quotaWarningEmail(input: {
   billingUrl: string;
 }) {
   return renderEmailLayout({
-    previewText: `${input.tenantName} has used ${input.usedPercent} of included voice minutes.`,
+    previewText: `${input.tenantName} has used ${input.usedPercent} of included web voice usage.`,
     eyebrow: "Usage warning",
     title: "Voice quota warning",
-    body: `${input.tenantName} has used ${input.usedPercent} of included voice minutes.\nReview billing settings to avoid service interruption.`,
+    body: `${input.tenantName} has used ${input.usedPercent} of included web voice usage.\nReview billing settings to avoid service interruption.`,
     action: { label: "Review billing", href: input.billingUrl },
   });
 }
@@ -43,7 +43,7 @@ export function dailySummaryEmail(input: {
     details: [
       { label: "Paid orders", value: input.paidOrders },
       { label: "Revenue collected", value: input.revenue },
-      { label: "Missed calls", value: input.missedCalls },
+      { label: "Unfinished voice orders", value: input.missedCalls },
     ],
     action: { label: "Open dashboard", href: input.dashboardUrl },
   });

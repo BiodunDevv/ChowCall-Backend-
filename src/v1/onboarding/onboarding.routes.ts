@@ -6,7 +6,7 @@ import { Tenant } from "../tenants/tenant.model.js";
 import { MenuItem } from "../menu/menu-item.model.js";
 
 const stepSchema = z.object({
-  step: z.enum(["profile", "logo", "location", "hours", "menu", "delivery", "fees", "payment", "notifications", "escalation", "phone"]),
+  step: z.enum(["profile", "logo", "location", "hours", "menu", "delivery", "fees", "payment", "notifications", "escalation"]),
   data: z.record(z.unknown()),
 });
 
@@ -34,8 +34,6 @@ onboardingRouter.patch("/steps", async (req, res) => {
   if (step === "payment") updates.payment = data;
   if (step === "notifications") updates.kitchenWhatsAppNumber = data.kitchenWhatsAppNumber;
   if (step === "escalation") updates.escalationContacts = data.contacts;
-  if (step === "phone") updates.voice = data;
-
   const tenant = await Tenant.findByIdAndUpdate(req.user!.tenantId, {
     $set: updates,
     $addToSet: { "onboarding.completedSteps": step },
@@ -54,7 +52,6 @@ onboardingRouter.get("/readiness", async (req, res) => {
     fees: Boolean(tenant?.serviceFee),
     payment: tenant?.payment?.provider === "paystack",
     notifications: Boolean(tenant?.kitchenWhatsAppNumber || tenant?.phone),
-    phone: Boolean(tenant?.voice?.routingNumber || tenant?.voice?.dedicatedNumber),
   };
   const failures = Object.entries(checks).filter(([, ready]) => !ready).map(([name]) => name);
   await Tenant.findByIdAndUpdate(req.user!.tenantId, { $set: { "onboarding.checks": checks, "onboarding.readinessFailures": failures } });

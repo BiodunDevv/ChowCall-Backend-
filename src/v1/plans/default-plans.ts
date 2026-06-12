@@ -2,7 +2,7 @@ export const defaultPlans = [
   {
     slug: "starter",
     name: "Starter",
-    description: "For small restaurants starting phone-order automation.",
+    description: "For small restaurants starting web AI voice ordering.",
     priceMonthly: 69000,
     currency: "NGN",
     includedMinutes: 250,
@@ -15,7 +15,7 @@ export const defaultPlans = [
       "WhatsApp & SMS notifications",
       "Menu management with availability toggles",
       "Order dashboard",
-      "Basic call & order analytics",
+      "Basic voice order analytics",
       "Single restaurant location",
       "Email support",
     ],
@@ -26,7 +26,7 @@ export const defaultPlans = [
   {
     slug: "growth",
     name: "Growth",
-    description: "For busy kitchens handling regular delivery and pickup calls.",
+    description: "For busy kitchens handling regular delivery and pickup voice orders.",
     priceMonthly: 169000,
     currency: "NGN",
     includedMinutes: 800,
@@ -58,7 +58,7 @@ export const defaultPlans = [
     features: [
       "Everything in Growth",
       "Multi-branch support",
-      "Dedicated routing numbers per branch",
+      "Multi-branch public ordering links",
       "Category-based & packaging service fees",
       "Full API access",
       "Custom AI greeting & voice",

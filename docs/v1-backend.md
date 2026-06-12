@@ -19,7 +19,7 @@ All tenant endpoints must apply tenant-scoped queries.
 
 ## Pricing Engines
 
-Voice orders and public web orders must use the same pricing engine:
+Web voice orders and public web orders must use the same pricing engine:
 
 ```text
 totalPayable = itemSubtotal + deliveryFee + serviceFee - discount
@@ -29,12 +29,12 @@ Delivery pricing is distance-first. Named zones are only overrides or fallbacks.
 
 ## Shared AI Ordering Engine
 
-`src/v1/ai-ordering` is the shared server-side ordering core for public chat and Twilio voice calls.
+`src/v1/ai-ordering` is the shared server-side ordering core for public web AI voice ordering.
 
 It owns:
 
 - tenant lookup by path-based `tenantSlug`
-- chat and voice session state
+- web voice session state
 - menu item matching and sold-out checks
 - order draft updates
 - pickup/delivery/customer detail requirements
@@ -61,13 +61,13 @@ The backend now supports:
 - Tenant-scoped menu, inventory, delivery pricing, service fee, staff, analytics, billing, and escalation routes.
 - Dashboard order creation with shared pricing logic.
 - Public menu, public quote, and public checkout.
-- Backend-driven public AI chat sessions and messages.
+- Backend-driven public AI voice sessions and transcript messages.
 - Public order creation from a validated AI draft.
 - Secure public order status by token or phone verification.
 - Payment link creation for tenant orders.
 - Paystack webhook verification, idempotent payment confirmation, `PAID` order status, and kitchen-ticket dispatch.
 - Twilio SMS test endpoint.
-- Twilio gather-mode voice ordering endpoints that call the same AI ordering engine.
+- Future Twilio phone-routing endpoints remain scaffolded, but web AI voice ordering is the active customer channel.
 
 Next implementation priorities:
 
