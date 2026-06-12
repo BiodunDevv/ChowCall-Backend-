@@ -3,7 +3,11 @@ import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { Router } from "express";
 import { AppError } from "../../shared/errors/app-error.js";
-import { azureVoiceLiveService, type VoiceLiveServerEvent } from "../../providers/voice/azure-voice-live.service.js";
+import {
+  AzureVoiceLiveBridge,
+  azureVoiceLiveService,
+  type VoiceLiveServerEvent,
+} from "../../providers/voice/azure-voice-live.service.js";
 import { Tenant } from "../tenants/tenant.model.js";
 import { MenuItem } from "../menu/menu-item.model.js";
 import { ChatSession } from "../ai-ordering/chat-session.model.js";
@@ -11,6 +15,7 @@ import { VoiceSession } from "../ai-ordering/voice-session.model.js";
 import { handleOrderingMessage, startOrderingSession } from "../ai-ordering/ai-ordering-engine.js";
 
 export const liveVoiceRouter = Router({ mergeParams: true });
+const liveVoiceBridges = new Map<string, AzureVoiceLiveBridge>();
 
 function normalizeTenantVoice(tenant: { name: string; voice?: { greeting?: string | null; enabled?: boolean | null } | null }) {
   return {
@@ -218,6 +223,14 @@ function encodeFrame(payload: string) {
   return Buffer.concat([header, data]);
 }
 
+function encodeCloseFrame(code = 1000, reason = "") {
+  const reasonBuffer = Buffer.from(reason);
+  const payload = Buffer.alloc(2 + reasonBuffer.length);
+  payload.writeUInt16BE(code, 0);
+  reasonBuffer.copy(payload, 2);
+  return Buffer.concat([Buffer.from([0x88, payload.length]), payload]);
+}
+
 function decodeTextFrames(buffer: Buffer) {
   const messages: string[] = [];
   let offset = 0;
@@ -251,8 +264,51 @@ function decodeTextFrames(buffer: Buffer) {
   return messages;
 }
 
+function isSocketOpen(socket: Socket) {
+  return !socket.destroyed && !socket.closed && !socket.writableEnded && socket.writable;
+}
+
 function send(socket: Socket, event: VoiceLiveServerEvent) {
-  if (!socket.destroyed) socket.write(encodeFrame(JSON.stringify(event)));
+  if (!isSocketOpen(socket)) return false;
+  try {
+    socket.write(encodeFrame(JSON.stringify(event)));
+    return true;
+  } catch {
+    // Browser closed the WebSocket while Azure was still emitting events.
+    return false;
+  }
+}
+
+function closeSocket(socket: Socket, code = 1000, reason = "Session ended") {
+  if (!isSocketOpen(socket)) return;
+  try {
+    socket.write(encodeCloseFrame(code, reason.slice(0, 80)));
+    socket.end();
+  } catch {
+    socket.destroy();
+  }
+}
+
+function buildVoiceInstructions(args: {
+  tenantName: string;
+  greeting: string;
+  menuItems: Array<{ name?: string; category?: string; basePrice?: number; isAvailable?: boolean }>;
+}) {
+  const menuSummary = args.menuItems
+    .filter((item) => item.isAvailable !== false)
+    .slice(0, 80)
+    .map((item) => `${item.name} (${item.category ?? "Menu"}) - ₦${Number(item.basePrice ?? 0).toLocaleString("en-NG")}`)
+    .join("; ");
+
+  return [
+    `You are ChowCall, the live AI voice ordering assistant for ${args.tenantName}.`,
+    "Speak naturally and briefly. Ask one clear follow-up question at a time.",
+    "Only discuss food ordering for this restaurant. If the customer asks for something unrelated, gently redirect them back to ordering.",
+    "Do not invent menu items, prices, discounts, delivery fees, or payment details.",
+    "When the customer asks for the menu, summarize the available menu and say they can also tap the Menu button to view everything.",
+    `Restaurant greeting: ${args.greeting}`,
+    `Available menu context: ${menuSummary || "No menu items are currently available."}`,
+  ].join("\n");
 }
 
 export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socket) {
@@ -262,7 +318,7 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
 
   const key = req.headers["sec-websocket-key"];
   if (!key || Array.isArray(key)) {
-    socket.destroy();
+    closeSocket(socket, 1002, "Invalid WebSocket key");
     return true;
   }
 
@@ -279,6 +335,18 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
 
   const tenantSlug = decodeURIComponent(match[1]);
   const sessionId = decodeURIComponent(match[2]);
+  let bridge: AzureVoiceLiveBridge | null = null;
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    const bridge = liveVoiceBridges.get(sessionId);
+    liveVoiceBridges.delete(sessionId);
+    void bridge?.stop();
+  };
+  socket.on("error", cleanup);
+  socket.on("close", cleanup);
+  socket.on("end", cleanup);
 
   try {
     const { tenant, voiceSession } = await getLiveSession(tenantSlug, sessionId);
@@ -288,35 +356,90 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
 
     if (!azureVoiceLiveService.isConfigured()) {
       send(socket, azureVoiceLiveService.unavailableEvent());
+      closeSocket(socket, 1011, "Voice Live not configured");
       return true;
     }
 
-    for (const event of azureVoiceLiveService.initialEvents({
+    const menuItems = await MenuItem.find({ tenantId: tenant._id })
+      .select("name category basePrice isAvailable")
+      .sort({ category: 1, name: 1 })
+      .lean<Array<{ name?: string; category?: string; basePrice?: number; isAvailable?: boolean }>>();
+
+    bridge = new AzureVoiceLiveBridge({
       sessionId,
       tenantSlug,
       tenantName: tenant.name,
       greeting: voice.greeting,
-    })) {
-      send(socket, event);
-    }
+      instructions: buildVoiceInstructions({ tenantName: tenant.name, greeting: voice.greeting, menuItems }),
+      send: (event) => {
+        if (!isSocketOpen(socket)) return;
+        send(socket, event);
+        if (event.type === "error" && event.code.startsWith("AZURE_VOICE_LIVE")) {
+          cleanup();
+          closeSocket(socket, 1011, "Azure Voice Live unavailable");
+        }
+      },
+      onUserTranscript: async (transcript) => {
+        if (!isSocketOpen(socket)) return;
+        const result = await handleOrderingMessage({
+          tenantSlug,
+          sessionId: voiceSession.chatSessionId ? String(voiceSession.chatSessionId) : undefined,
+          message: transcript,
+        });
+        if (result.session?.id) voiceSession.set("chatSessionId", result.session.id);
+        voiceSession.turns.push({
+          callerText: transcript,
+          assistantText: result.assistantMessage,
+          confidence: 1,
+        });
+        voiceSession.status = result.paymentReady ? "payment_pending" : "active";
+        voiceSession.paymentStatus = result.paymentReady ? "ready" : "not_ready";
+        await voiceSession.save();
+        send(socket, { type: "order.updated", order: result.session });
+        send(socket, { type: "caption.assistant", text: result.assistantMessage });
+        if (result.paymentReady) send(socket, { type: "payment.ready" });
+        return result.assistantMessage;
+      },
+    });
+    liveVoiceBridges.set(sessionId, bridge);
+    await bridge.start();
 
     socket.on("data", (chunk) => {
+      if (!bridge || !isSocketOpen(socket)) return;
       for (const raw of decodeTextFrames(chunk)) {
         try {
-          const event = JSON.parse(raw) as { type?: string };
-          if (event.type === "audio.mute") send(socket, { type: "caption.assistant", text: "Muted. I will wait until you unmute." });
-          if (event.type === "audio.unmute") send(socket, { type: "caption.assistant", text: "I can hear you again." });
-          if (event.type === "session.end") {
+          const event = JSON.parse(raw) as { type?: string; audio?: string; data?: string };
+          if (event.type === "audio.chunk" || event.type === "audio_chunk") {
+            void bridge.sendAudio(event.audio ?? event.data).catch((error) => {
+              const message = error instanceof Error ? error.message : String(error);
+              console.error(`[VoiceLive:audio_route] ${message}`);
+            });
+          }
+          if (event.type === "interrupt") {
+            send(socket, { type: "stop_playback" });
+          }
+          if (event.type === "audio.mute") {
+            send(socket, { type: "caption.assistant", text: "Muted. I will wait until you unmute." });
+          }
+          if (event.type === "audio.unmute") {
+            send(socket, { type: "caption.assistant", text: "I can hear you again." });
+          }
+          if (event.type === "session.end" || event.type === "stop_session") {
             send(socket, { type: "session.ended" });
-            socket.end();
+            send(socket, { type: "session_stopped" });
+            cleanup();
+            closeSocket(socket);
           }
         } catch {
           send(socket, { type: "error", code: "LIVE_VOICE_EVENT_INVALID", message: "Could not read the live voice event." });
         }
       }
     });
-  } catch {
-    send(socket, { type: "error", code: "LIVE_VOICE_SESSION_FAILED", message: "Could not start this live voice session." });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Could not start this live voice session.";
+    send(socket, { type: "error", code: "LIVE_VOICE_SESSION_FAILED", message });
+    cleanup();
+    closeSocket(socket, 1011, "Live voice startup failed");
   }
 
   return true;

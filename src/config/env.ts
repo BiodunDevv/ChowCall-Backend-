@@ -30,6 +30,8 @@ const envSchema = z.object({
   MAPS_PROVIDER: z.enum(["mapbox"]).default("mapbox"),
   MAPBOX_ACCESS_TOKEN: z.string().min(1),
   LIVE_VOICE_PROVIDER: z.enum(["azure_voice_live"]).default("azure_voice_live"),
+  AZURE_VOICELIVE_ENDPOINT: z.string().url().optional().default("https://eastus.api.cognitive.microsoft.com/"),
+  AZURE_VOICELIVE_API_KEY: z.string().optional().default(""),
   AZURE_EXISTING_AGENT_NAME: z.string().default("Chowcall"),
   AZURE_EXISTING_AGENT_VERSION: z.string().default("2"),
   AZURE_ENV_NAME: z.string().optional().default(""),
