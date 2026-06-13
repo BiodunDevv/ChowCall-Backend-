@@ -3,6 +3,7 @@ import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import { Router } from "express";
 import { AppError } from "../../shared/errors/app-error.js";
+import { isRestaurantOpen } from "../../shared/utils/restaurant-hours.js";
 import {
   AwsNovaSonicBridge,
   awsNovaSonicService,
@@ -31,11 +32,12 @@ function normalizeTenantVoice(tenant: {
 }
 
 async function resolveTenant(tenantSlug: string, requireActive = true) {
-  const tenant = await Tenant.findOne({ slug: tenantSlug }).select("name slug subscriptionStatus voice").lean<{
+  const tenant = await Tenant.findOne({ slug: tenantSlug }).select("name slug subscriptionStatus voice openingHours").lean<{
     _id: unknown;
     name: string;
     slug: string;
     subscriptionStatus?: string | null;
+    openingHours?: unknown;
     voice?: ({ enabled?: boolean | null; greeting?: string | null } & Partial<NovaSonicVoiceSettings>) | null;
   }>();
   if (!tenant) throw new AppError(404, "Restaurant not found.", "TENANT_NOT_FOUND");
@@ -48,6 +50,9 @@ async function resolveTenant(tenantSlug: string, requireActive = true) {
   }
   if (tenant.voice?.enabled === false) {
     throw new AppError(404, "Live voice ordering is not active for this restaurant.", "AI_ORDERING_DISABLED");
+  }
+  if (requireActive && !isRestaurantOpen(tenant.openingHours)) {
+    throw new AppError(409, "This restaurant is currently closed and is not accepting voice orders.", "RESTAURANT_CLOSED");
   }
   return tenant;
 }
@@ -250,22 +255,26 @@ function decodeTextFrames(buffer: Buffer) {
   const messages: string[] = [];
   let offset = 0;
   while (offset + 2 <= buffer.length) {
+    const frameStart = offset;
     const opcode = buffer[offset] & 0x0f;
     const masked = (buffer[offset + 1] & 0x80) === 0x80;
     let length = buffer[offset + 1] & 0x7f;
     offset += 2;
     if (length === 126) {
-      if (offset + 2 > buffer.length) break;
+      if (offset + 2 > buffer.length) return { messages, remaining: buffer.subarray(frameStart) };
       length = buffer.readUInt16BE(offset);
       offset += 2;
     } else if (length === 127) {
-      if (offset + 8 > buffer.length) break;
+      if (offset + 8 > buffer.length) return { messages, remaining: buffer.subarray(frameStart) };
       length = Number(buffer.readBigUInt64BE(offset));
       offset += 8;
     }
+    if (masked && offset + 4 > buffer.length) {
+      return { messages, remaining: buffer.subarray(frameStart) };
+    }
     const mask = masked ? buffer.subarray(offset, offset + 4) : null;
     if (masked) offset += 4;
-    if (offset + length > buffer.length) break;
+    if (offset + length > buffer.length) return { messages, remaining: buffer.subarray(frameStart) };
     const data = buffer.subarray(offset, offset + length);
     offset += length;
     if (opcode === 0x8) break;
@@ -276,7 +285,7 @@ function decodeTextFrames(buffer: Buffer) {
     }
     messages.push(unmasked.toString("utf8"));
   }
-  return messages;
+  return { messages, remaining: buffer.subarray(offset) };
 }
 
 function isSocketOpen(socket: Socket) {
@@ -354,6 +363,7 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
   const tenantSlug = decodeURIComponent(match[1]);
   const sessionId = decodeURIComponent(match[2]);
   let bridge: AwsNovaSonicBridge | null = null;
+  let pendingSocketData = Buffer.alloc(0);
   let cleanedUp = false;
   const cleanup = () => {
     if (cleanedUp) return;
@@ -430,7 +440,10 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
 
     socket.on("data", (chunk) => {
       if (!bridge || !isSocketOpen(socket)) return;
-      for (const raw of decodeTextFrames(chunk)) {
+      pendingSocketData = Buffer.concat([pendingSocketData, chunk]);
+      const decoded = decodeTextFrames(pendingSocketData);
+      pendingSocketData = Buffer.from(decoded.remaining);
+      for (const raw of decoded.messages) {
         try {
           const event = JSON.parse(raw) as { type?: string; audio?: string; data?: string };
           if (event.type === "audio.chunk" || event.type === "audio_chunk") {

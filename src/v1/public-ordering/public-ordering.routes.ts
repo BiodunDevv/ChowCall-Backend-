@@ -18,10 +18,17 @@ import {
 } from "../ai-ordering/ai-ordering-engine.js";
 import { liveVoiceRouter } from "./live-voice.routes.js";
 import { normalizeNovaSonicVoice } from "../../config/voice-options.js";
+import { isRestaurantOpen } from "../../shared/utils/restaurant-hours.js";
 
 export const publicOrderingRouter = Router();
 
 publicOrderingRouter.use("/:tenantSlug/live-voice", liveVoiceRouter);
+
+function requireRestaurantOpen(openingHours: unknown) {
+  if (!isRestaurantOpen(openingHours)) {
+    throw new AppError(409, "This restaurant is currently closed and is not accepting orders.", "RESTAURANT_CLOSED");
+  }
+}
 
 function normalizeMenuName(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
@@ -307,6 +314,7 @@ publicOrderingRouter.post("/:tenantSlug/orders/:orderId/payment-link", async (re
 publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
   try {
     const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
+    requireRestaurantOpen(tenant.openingHours);
     const items = await resolvePublicOrderItems(tenant._id, req.body.items ?? []);
 
     const priced = priceOrder({
@@ -333,6 +341,7 @@ publicOrderingRouter.post("/:tenantSlug/quote", async (req, res, next) => {
 publicOrderingRouter.post("/:tenantSlug/checkout", async (req, res, next) => {
   try {
     const { tenant } = await resolvePublicTenant(req.params.tenantSlug, { requireActive: true });
+    requireRestaurantOpen(tenant.openingHours);
     const items = await resolvePublicOrderItems(tenant._id, req.body.items ?? []);
 
     const priced = priceOrder({

@@ -5,6 +5,8 @@ import { requireRoles } from "../../shared/middleware/rbac.js";
 import { Tenant } from "../tenants/tenant.model.js";
 import { Order } from "../orders/order.model.js";
 import { Payment } from "../payments/payment.model.js";
+import { User } from "../users/user.model.js";
+import { Plan } from "../plans/plan.model.js";
 import { env } from "../../config/env.js";
 
 export const adminRouter = Router();
@@ -301,4 +303,162 @@ adminRouter.get("/platform/infrastructure", (_req, res) => {
       { name: "Paystack Gateway", status: "operational" },
     ],
   });
+});
+
+// ── Tenant management ─────────────────────────────────────────────────────────
+
+adminRouter.get("/tenants", async (req, res, next) => {
+  try {
+    const { search, status, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const filter: Record<string, unknown> = {};
+    if (status && status !== "all") filter.subscriptionStatus = status;
+    if (search) filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { slug: { $regex: search, $options: "i" } },
+    ];
+    const [tenants, total] = await Promise.all([
+      Tenant.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select("name slug logo subscriptionStatus onboarding createdAt phone address"),
+      Tenant.countDocuments(filter),
+    ]);
+    res.json({ data: tenants, total, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) { next(err); }
+});
+
+adminRouter.get("/tenants/:id", async (req, res, next) => {
+  try {
+    const tenant = await Tenant.findById(req.params.id);
+    if (!tenant) { res.status(404).json({ error: { message: "Tenant not found" } }); return; }
+    res.json({ data: tenant });
+  } catch (err) { next(err); }
+});
+
+const tenantStatusSchema = z.object({
+  status: z.enum(["active", "suspended", "cancelled", "trialing"]),
+});
+
+adminRouter.patch("/tenants/:id/status", async (req, res, next) => {
+  try {
+    const { status } = tenantStatusSchema.parse(req.body);
+    const tenant = await Tenant.findByIdAndUpdate(
+      req.params.id,
+      { subscriptionStatus: status },
+      { new: true },
+    );
+    if (!tenant) { res.status(404).json({ error: { message: "Tenant not found" } }); return; }
+    res.json({ data: tenant, message: `Tenant status updated to ${status}.` });
+  } catch (err) { next(err); }
+});
+
+// ── User management ───────────────────────────────────────────────────────────
+
+adminRouter.get("/users", async (req, res, next) => {
+  try {
+    const { search, role, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const filter: Record<string, unknown> = {};
+    if (role && role !== "all") filter.platformRoles = role;
+    if (search) filter.$or = [
+      { name: { $regex: search, $options: "i" } },
+      { email: { $regex: search, $options: "i" } },
+    ];
+    const [users, total] = await Promise.all([
+      User.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select("-passwordHash -refreshTokenHash"),
+      User.countDocuments(filter),
+    ]);
+    res.json({ data: users, total, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) { next(err); }
+});
+
+adminRouter.get("/users/:id", async (req, res, next) => {
+  try {
+    const user = await User.findById(req.params.id).select("-passwordHash -refreshTokenHash");
+    if (!user) { res.status(404).json({ error: { message: "User not found" } }); return; }
+    res.json({ data: user });
+  } catch (err) { next(err); }
+});
+
+const userRolesSchema = z.object({ roles: z.array(z.string()).min(1) });
+
+adminRouter.patch("/users/:id/roles", async (req, res, next) => {
+  try {
+    const { roles } = userRolesSchema.parse(req.body);
+    const user = await User.findByIdAndUpdate(req.params.id, { platformRoles: roles }, { new: true })
+      .select("-passwordHash -refreshTokenHash");
+    if (!user) { res.status(404).json({ error: { message: "User not found" } }); return; }
+    res.json({ data: user, message: "User roles updated." });
+  } catch (err) { next(err); }
+});
+
+const userStatusSchema = z.object({ active: z.boolean() });
+
+adminRouter.patch("/users/:id/status", async (req, res, next) => {
+  try {
+    const { active } = userStatusSchema.parse(req.body);
+    const update = active ? { active: true, $unset: { disabledAt: 1 } } : { active: false, disabledAt: new Date() };
+    const user = await User.findByIdAndUpdate(req.params.id, update, { new: true })
+      .select("-passwordHash -refreshTokenHash");
+    if (!user) { res.status(404).json({ error: { message: "User not found" } }); return; }
+    res.json({ data: user, message: `User ${active ? "activated" : "deactivated"}.` });
+  } catch (err) { next(err); }
+});
+
+// ── Platform-wide orders ──────────────────────────────────────────────────────
+
+adminRouter.get("/orders", async (req, res, next) => {
+  try {
+    const { status, source, tenantId, page = "1", limit = "50" } = req.query as Record<string, string>;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const filter: Record<string, unknown> = {};
+    if (status && status !== "all") filter.status = status.toUpperCase();
+    if (source && source !== "all") filter.source = source;
+    if (tenantId) filter.tenantId = tenantId;
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .select("orderNumber status source fulfilmentType customer pricing payment createdAt tenantId items"),
+      Order.countDocuments(filter),
+    ]);
+    res.json({ data: orders, total, page: parseInt(page), limit: parseInt(limit) });
+  } catch (err) { next(err); }
+});
+
+// ── Platform plans management ─────────────────────────────────────────────────
+
+adminRouter.get("/plans", async (_req, res, next) => {
+  try {
+    const plans = await Plan.find().sort({ sortOrder: 1, priceMonthly: 1 });
+    res.json({ data: plans });
+  } catch (err) { next(err); }
+});
+
+const createPlanSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  priceMonthly: z.number().min(0),
+  currency: z.string().default("NGN"),
+  includedMinutes: z.number().int().min(0).default(0),
+  overagePerMinute: z.number().min(0).default(0),
+  features: z.array(z.string()).default([]),
+  badge: z.string().optional(),
+  sortOrder: z.number().int().default(0),
+  active: z.boolean().default(true),
+});
+
+adminRouter.post("/plans", async (req, res, next) => {
+  try {
+    const payload = createPlanSchema.parse(req.body);
+    const plan = await Plan.create(payload);
+    res.status(201).json({ data: plan });
+  } catch (err) { next(err); }
 });

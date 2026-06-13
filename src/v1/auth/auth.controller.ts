@@ -104,7 +104,8 @@ export const login: RequestHandler = async (req, res, next) => {
     const roles = (membership?.roles?.length ? membership.roles : user.platformRoles) as Role[];
     const tenant = membership?.tenantId ? await Tenant.findById(membership.tenantId) : null;
 
-    if (user.twoFaEnabled !== false) {
+    const isPlatformRole = roles.some((r) => r === "platform_owner" || r === "platform_admin");
+    if (!isPlatformRole && user.twoFaEnabled !== false) {
       const challenge = await createLoginOtpChallenge(user, roles, tenant);
       res.json({
         requiresOtp: true,

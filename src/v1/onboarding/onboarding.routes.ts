@@ -4,6 +4,7 @@ import { requireAuth } from "../../shared/middleware/auth.js";
 import { requireTenant } from "../../shared/middleware/tenant-scope.js";
 import { Tenant } from "../tenants/tenant.model.js";
 import { MenuItem } from "../menu/menu-item.model.js";
+import { normalizeOpeningHours } from "../../shared/utils/restaurant-hours.js";
 
 const stepSchema = z.object({
   step: z.enum(["profile", "logo", "location", "hours", "menu", "delivery", "fees", "payment", "notifications", "escalation"]),
@@ -28,7 +29,7 @@ onboardingRouter.patch("/steps", async (req, res) => {
   if (step === "profile") Object.assign(updates, { name: data.name, phone: data.phone });
   if (step === "logo") updates.logo = (data as Record<string,unknown>).logoUrl;
   if (step === "location") Object.assign(updates, { address: data.address, mapPin: data.mapPin });
-  if (step === "hours") updates.openingHours = data;
+  if (step === "hours") updates.openingHours = normalizeOpeningHours(data);
   if (step === "delivery") updates.deliveryPricing = data;
   if (step === "fees") updates.serviceFee = data;
   if (step === "payment") updates.payment = data;

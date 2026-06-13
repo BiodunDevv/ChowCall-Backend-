@@ -11,6 +11,7 @@ import {
   isValidNovaSonicVoice,
   normalizeNovaSonicVoice,
 } from "../../config/voice-options.js";
+import { normalizeOpeningHours } from "../../shared/utils/restaurant-hours.js";
 
 export const tenantRouter = Router();
 
@@ -82,7 +83,7 @@ tenantRouter.patch(
       const { schedule } = hoursSchema.parse(req.body);
       const tenant = await Tenant.findByIdAndUpdate(
         req.user!.tenantId,
-        { openingHours: schedule },
+        { openingHours: normalizeOpeningHours(schedule) },
         { new: true },
       ).select("openingHours");
       res.json({ data: tenant?.openingHours ?? {} });

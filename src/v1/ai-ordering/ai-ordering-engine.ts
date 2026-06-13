@@ -3,6 +3,7 @@ import type { FilterQuery } from "mongoose";
 import { AppError } from "../../shared/errors/app-error.js";
 import { azureOpenAiProvider } from "../../providers/ai/azure-openai.provider.js";
 import { createReference } from "../../shared/utils/reference.js";
+import { isRestaurantOpen } from "../../shared/utils/restaurant-hours.js";
 import { mapboxMapsProvider } from "../../providers/maps/mapbox-maps.provider.js";
 import { brevoEmailProvider } from "../../providers/email/brevo-email.provider.js";
 import { paymentLinkEmail, paymentConfirmedEmail } from "../../providers/email/templates/order.templates.js";
@@ -30,6 +31,7 @@ type PublicTenantDoc = {
   aiAgent?: { enabled?: boolean | null; instructions?: string | null } | null;
   voice?: { enabled?: boolean | null } | null;
   subscriptionStatus?: string | null;
+  openingHours?: unknown;
 };
 
 type MenuDoc = {
@@ -275,6 +277,9 @@ async function resolveTenant(tenantSlug: string) {
     throw new AppError(403, "AI ordering is available after this restaurant activates ChowCall.", "AI_ORDERING_REQUIRES_ACTIVE_SUBSCRIPTION");
   }
   if (tenant.voice?.enabled === false) throw new AppError(404, "AI ordering is not active for this restaurant.", "AI_ORDERING_DISABLED");
+  if (!isRestaurantOpen(tenant.openingHours)) {
+    throw new AppError(409, "This restaurant is currently closed and is not accepting orders.", "RESTAURANT_CLOSED");
+  }
   return tenant;
 }
 
