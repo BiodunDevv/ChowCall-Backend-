@@ -101,11 +101,11 @@ export class AwsNovaSonicBridge {
   private stopped = false;
   private failed = false;
   private audioInputStarted = false;
-  private greetingCompleted = false;
   private assistantTurnActive = false;
+  private audioChunkCount = 0;
+  private audioOutputChunkCount = 0;
   private readonly promptName = `prompt_${randomUUID().replaceAll("-", "")}`;
   private readonly systemContentName = `system_${randomUUID().replaceAll("-", "")}`;
-  private readonly greetingContentName = `greeting_${randomUUID().replaceAll("-", "")}`;
   private readonly audioContentName = `audio_${randomUUID().replaceAll("-", "")}`;
 
   constructor(private readonly config: AwsNovaSonicBridgeConfig) {}
@@ -152,28 +152,15 @@ export class AwsNovaSonicBridge {
       promptName: this.promptName,
       contentName: this.systemContentName,
     }));
-    this.queue.push(this.eventInput("contentStart", {
-      promptName: this.promptName,
-      contentName: this.greetingContentName,
-      type: "TEXT",
-      interactive: true,
-      role: "USER",
-      textInputConfiguration: { mediaType: "text/plain" },
-    }));
-    this.queue.push(this.eventInput("textInput", {
-      promptName: this.promptName,
-      contentName: this.greetingContentName,
-      content: `Begin this voice ordering session now. Say exactly: "${this.config.greeting}"`,
-    }));
-    this.queue.push(this.eventInput("contentEnd", {
-      promptName: this.promptName,
-      contentName: this.greetingContentName,
-    }));
     void this.runBedrockStream();
   }
 
   async sendAudio(audioBase64?: string) {
     if (!audioBase64 || !this.audioInputStarted || this.stopped || this.failed) return;
+    this.audioChunkCount += 1;
+    if (this.audioChunkCount === 1 || this.audioChunkCount % 50 === 0) {
+      console.info(`[NovaSonic:audio] ${this.config.sessionId} received ${this.audioChunkCount} browser audio chunks`);
+    }
     this.queue.push(this.eventInput("audioInput", {
       promptName: this.promptName,
       contentName: this.audioContentName,
@@ -226,13 +213,7 @@ export class AwsNovaSonicBridge {
         agentVersion: this.config.voiceSettings.modelId,
       });
       this.emit({ type: "caption.assistant", text: this.config.greeting });
-      this.emit({ type: "status", state: "thinking" });
-      setTimeout(() => {
-        if (!this.stopped && !this.failed && !this.audioInputStarted) {
-          console.warn(`[NovaSonic:startup] Greeting response timed out for ${this.config.sessionId}; opening microphone input.`);
-          this.startAudioInput();
-        }
-      }, 8_000);
+      this.startAudioInput();
 
       for await (const event of response.body ?? []) {
         if (this.stopped || this.failed) break;
@@ -324,6 +305,7 @@ export class AwsNovaSonicBridge {
     if (textOutput) {
       const text = stringValue(textOutput.content);
       if (text) {
+        console.info(`[NovaSonic:text] ${this.config.sessionId} ${text.slice(0, 120)}`);
         this.emit({ type: "status", state: "speaking" });
         this.emit({ type: "caption.assistant", text });
         this.emit({ type: "transcript", role: "assistant", text, isFinal: true });
@@ -335,6 +317,12 @@ export class AwsNovaSonicBridge {
     if (audioOutput) {
       const audio = stringValue(audioOutput.content);
       if (audio) {
+        this.audioOutputChunkCount += 1;
+        if (this.audioOutputChunkCount === 1 || this.audioOutputChunkCount % 20 === 0) {
+          console.info(
+            `[NovaSonic:audio_output] ${this.config.sessionId} chunk=${this.audioOutputChunkCount} size=${audio.length} base64 chars`,
+          );
+        }
         this.emit({ type: "status", state: "speaking" });
         this.emit({
           type: "audio_data",
@@ -362,10 +350,7 @@ export class AwsNovaSonicBridge {
     if (contentEnd) {
       if (!this.assistantTurnActive) return;
       this.assistantTurnActive = false;
-      if (!this.greetingCompleted) {
-        this.greetingCompleted = true;
-        this.startAudioInput();
-      } else if (this.audioInputStarted) {
+      if (this.audioInputStarted) {
         this.emit({ type: "status", state: "listening" });
       }
       return;
@@ -410,6 +395,7 @@ export class AwsNovaSonicBridge {
   private startAudioInput() {
     if (this.audioInputStarted || this.stopped || this.failed) return;
     this.audioInputStarted = true;
+    console.info(`[NovaSonic:ready] ${this.config.sessionId} microphone input opened`);
     this.queue.push(this.eventInput("contentStart", {
       promptName: this.promptName,
       contentName: this.audioContentName,

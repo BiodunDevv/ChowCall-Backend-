@@ -446,6 +446,10 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
       for (const raw of decoded.messages) {
         try {
           const event = JSON.parse(raw) as { type?: string; audio?: string; data?: string };
+          if (!event || typeof event !== "object" || !event.type) {
+            console.warn(`[LiveVoice:ws] Ignored app frame without type for ${sessionId}`);
+            continue;
+          }
           if (event.type === "audio.chunk" || event.type === "audio_chunk") {
             void bridge.sendAudio(event.audio ?? event.data).catch((error) => {
               const message = error instanceof Error ? error.message : String(error);
@@ -467,8 +471,11 @@ export async function handleLiveVoiceUpgrade(req: IncomingMessage, socket: Socke
             cleanup();
             closeSocket(socket);
           }
-        } catch {
-          send(socket, { type: "error", code: "LIVE_VOICE_EVENT_INVALID", message: "Could not read the live voice event." });
+        } catch (error) {
+          const preview = raw.length > 120 ? `${raw.slice(0, 120)}...` : raw;
+          console.warn(`[LiveVoice:ws] Ignored malformed app frame for ${sessionId}: ${preview}`, {
+            message: error instanceof Error ? error.message : String(error),
+          });
         }
       }
     });
